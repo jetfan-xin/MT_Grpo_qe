@@ -601,7 +601,7 @@ class CometRMPlugin(ORM):
     def __init__(self):
         print("load comet")
         # model_path = download_model("Unbabel/wmt23-cometkiwi-da-xl")
-        self.model = load_from_checkpoint("/mnt/workspace/xintong/pjh/models/wmt23-cometkiwi-da-xl/checkpoints/model.ckptl")
+        self.model = load_from_checkpoint("/mnt/workspace/xintong/pjh/models/wmt23-cometkiwi-da-xl/checkpoints/model.ckpt")
         import logging
         loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
         for logger in loggers:
