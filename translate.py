@@ -65,11 +65,9 @@ if __name__ == "__main__":
         zh = item["zh"]
         en = item["en"]
         if source == "zh":
-            # res = call_api(zh, system_prompt)
-            res = en
+            res = call_api(zh, system_prompt)
         else:
-            # res = call_api(en, system_prompt)
-            res = zh
+            res = call_api(en, system_prompt)
         result.append({"idx": i, "zh": zh, "en": en, "mt": res})
         i += 1
     
