@@ -3,7 +3,7 @@
 ## 2025.6.28
 测试grpo模型的效果
 1. 在`start_vllm.sh`文件里面指定训练好的模型地址到model_name：`/mnt/workspace/xintong/pjh/All_result/mt_grpo/grpo_output/qwen2.5-7b-inst/{version-时间戳}/{checkpoint最新的} `
-2. 在一个terminal运行`bash start_vllm.sh`（默认用了0号gpu）
+2. 在一个terminal运行`bash start_vllm.sh`（默认用了0，1号gpu）
 3. 等第二步服务起来之后，开一个terminal分别运行`python translate.py --lang zh2en`和`python translate.py --lang en2zh`。结果保存在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/eval_qwen2.5-7b_grpo/`
 
 ## 2025.6.24
