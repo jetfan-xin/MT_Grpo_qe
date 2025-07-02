@@ -13,6 +13,5 @@ else
   exit 1
 fi
 
-model_name=newest_model_name_here  # Replace with your actual model name
-# model_name=/mnt/data/users/liamding/data/models/Qwen2.5-7B-Instruct
+model_name=/mnt/workspace/xintong/pjh/All_result/mt_grpo/grpo_output/qwen2.5-7b-inst/v2-20250627-102443/checkpoint-3249
 CUDA_VISIBLE_DEVICES=0,1 vllm serve ${model_name} --dtype bfloat16 --gpu-memory-utilization 0.9 --tensor-parallel-size 2
