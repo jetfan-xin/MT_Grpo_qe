@@ -1,4 +1,9 @@
 # MT_Grpo
+## 2025.7.5
+训练verl
+1. 安装环境 `bash verl_env.sh`
+2. 开始训练 `bash custom_grpo.sh`
+
 
 ## 2025.6.28
 测试grpo模型的效果
