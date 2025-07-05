@@ -15,11 +15,12 @@ fi
 
 comet_rm=False
 comet_free_rm=True 
-
-python3 data/process_data.py \
-    --train_files "data/train/json/train_zhen_6565.jsonl" "data/train/json/train_enzh_6565.jsonl" \
-    --test_files "data/test/json/wmt23_zhen.jsonl" "data/test/json/wmt24_enzh.jsonl" \
-    --tokenizer_path ${model_path} \
+train_file_path=../data/train/parquet/train_base_enzh_zhen.parquet
+test_file_path=../data/test/parquet/test_base_enzh_zhen.parquet
+python3 ../data/process_data.py \
+    --train_files "../data/train/json/train_zhen_6565.jsonl" "../data/train/json/train_enzh_6565.jsonl" \
+    --test_files "../data/test/json/wmt23_zhen.jsonl" "../data/test/json/wmt24_enzh.jsonl" \
+    --tokenizer_path Qwen/Qwen2.5-7B \
     --template_type "base" \
     --train_output_file ${train_file_path} \
     --test_output_file ${test_file_path}

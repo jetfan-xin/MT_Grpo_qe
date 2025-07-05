@@ -1,8 +1,15 @@
 # MT_Grpo
 ## 2025.7.5
 训练verl
-1. 安装环境 `bash verl_env.sh`
-2. 开始训练 `bash custom_grpo.sh`
+1. 安装
+```bash
+cd verl
+USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
+pip install --no-deps -e .
+pip install sacrebleu unbabel-comet
+```
+2. 训练
+在verl目录下 `bash custom_grpo.sh`
 
 
 ## 2025.6.28
