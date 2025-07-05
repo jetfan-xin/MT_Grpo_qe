@@ -3,6 +3,7 @@
 训练verl
 1. 安装
 ```bash
+conda create -n pjh_verl python==3.10 -y
 cd verl
 USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
 pip install --no-deps -e .
