@@ -1,7 +1,7 @@
 # MT_Grpo
 ## 2025.7.5
 增大batch size 训练verl, 但是不确定是否会OOM
-`bash cutom_grpo2.sh`
+`bash custom_grpo2.sh`
 
 ## 2025.7.5
 训练verl
