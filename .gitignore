@@ -6,7 +6,9 @@ __pycache__/
 # C extensions
 *.so
 .DS_Store
-*.xlsx
+*.xlso
+parquet/
+test.py
 
 # Distribution / packaging
 .Python
