@@ -138,7 +138,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     model = _load_comet_model()  
     # comet_data = [{"src": src_text, "mt": answer_text, "ref": ground_truth}]  
     comet_data = [{"src": src_text, "mt": answer_text}]  
-    comet_scores = model.predict(comet_data, batch_size=8, gpus=0, progress_bar=False).scores  
+    comet_scores = model.predict(comet_data, batch_size=8, gpus=1, progress_bar=False).scores  
     comet_score = comet_scores[0]  
     # print("comet score: ", comet_score, "bleu score: ", bleu_score, "format score: ", format_score)
       

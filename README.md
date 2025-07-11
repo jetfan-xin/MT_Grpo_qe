@@ -1,5 +1,5 @@
 # MT_Grpo
-## 2025.7.1j
+## 2025.7.11
 增大推理时vllm的占用率，增大更新actor时的batch, 但是不确定是否会OOM
 `bash custom_grpo3.sh`
 
