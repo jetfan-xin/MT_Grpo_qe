@@ -1,4 +1,11 @@
 # MT_Grpo
+## 2025.7.24
+解决comet没有用GPU，并且进行batch运算
+- 在verl目录下 `bash custom_grpo_fast.sh`
+- 保存的路径应该是 `/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_7b_r1-zero`
+- 生成`custom_grpo_fast.log` 实时查看终端输出
+
+
 ## 2025.7.11
 增大推理时vllm的占用率，增大更新actor时的batch, 但是不确定是否会OOM
 `bash custom_grpo3.sh`
