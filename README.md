@@ -1,8 +1,8 @@
 # MT_Grpo
 ## 2025.8.3
 测试训练效果
-1. `cd verl`，然后`bash merge.sh`，合并模型权重，保存位置在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_7b_r1-zero`
-2. `conda activate pjh_verl`
+1. `conda activate pjh_verl`
+2. `cd verl`，然后`bash merge.sh`，合并模型权重，保存位置在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_7b_r1-zero`
 3. 运行 `CUDA_VISIBLE_DEVICES=0 python qwen25_gen.py`，保存的文件夹是`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_7b_r1-zero_verl/`
 
 
