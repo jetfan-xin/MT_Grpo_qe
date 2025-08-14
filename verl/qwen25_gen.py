@@ -129,7 +129,7 @@ if __name__ == "__main__":
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         torch_dtype="auto",
-        device_map="auto",
+        device_map="cuda:0",
     )
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
 
