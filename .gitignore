@@ -9,6 +9,7 @@ __pycache__/
 *.xlso
 parquet/
 test.py
+verl/test_*.py
 
 # Distribution / packaging
 .Python

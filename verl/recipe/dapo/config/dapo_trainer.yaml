@@ -11,6 +11,8 @@ data:
 
 reward_model:
   reward_manager: dapo
+  reward_kwargs:
+    entropy_beta: 1.0
   overlong_buffer: 
     enable: False # We try to avoid forgetting to set enable
     len: 0

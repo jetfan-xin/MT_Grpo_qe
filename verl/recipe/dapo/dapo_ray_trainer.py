@@ -144,6 +144,18 @@ class RayDAPOTrainer(RayPPOTrainer):
                     new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     new_batch = new_batch.union(gen_batch_output)
 
+                    # Pre-compute entropy for GTPO reward manager (if needed)
+                    reward_manager_name = self.config.reward_model.get("reward_manager", "")
+                    if reward_manager_name == "gtpo":
+                        print("🔍 GTPO reward manager detected: Pre-computing entropy for reward calculation...")
+                        with marked_timer("pre_entropy", timing_raw, "purple"):
+                            pre_entropy_data = self.actor_rollout_wg.compute_log_prob(new_batch)
+                            if "entropys" in pre_entropy_data.batch:
+                                new_batch.batch["entropys"] = pre_entropy_data.batch["entropys"]
+                                print(f"✅ Added entropy data: shape={pre_entropy_data.batch['entropys'].shape}")
+                            else:
+                                print("⚠️  No entropy found in pre-computed log_prob data")
+                    
                     with marked_timer("reward", timing_raw, "yellow"):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
@@ -193,8 +205,25 @@ class RayDAPOTrainer(RayPPOTrainer):
                             prompt_uid2metric_vals[uid].append(metric_val)
 
                         prompt_uid2metric_std = {}
+                        filtered_groups = []
                         for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
-                            prompt_uid2metric_std[prompt_uid] = np.std(metric_vals)
+                            std_val = np.std(metric_vals)
+                            prompt_uid2metric_std[prompt_uid] = std_val
+                            # 记录被过滤的组（标准差为0且有多个响应）
+                            if std_val == 0 and len(metric_vals) > 1:
+                                filtered_groups.append({
+                                    'uid': prompt_uid, 
+                                    'count': len(metric_vals),
+                                    'metric_val': metric_vals[0],  # 所有值都相同，取第一个
+                                    'metric_name': metric_name
+                                })
+
+                        # 打印被过滤的组信息
+                        if filtered_groups:
+                            print(f"\n[Filter Groups] Filtering {len(filtered_groups)} groups with identical {metric_name} values:")
+                            for group in filtered_groups:
+                                print(f"  - UID: {group['uid']}, Count: {group['count']}, {group['metric_name']}: {group['metric_val']:.4f}")
+                            print()
 
                         kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
                         num_prompt_in_batch += len(kept_prompt_uids)
@@ -239,14 +268,29 @@ class RayDAPOTrainer(RayPPOTrainer):
 
                     # recompute old_log_probs
                     with marked_timer("old_log_prob", timing_raw, "blue"):
-                        old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                        entropys = old_log_prob.batch["entropys"]
+                        # Check if we already have entropy data (from GTPO pre-computation)
+                        if "entropys" in batch.batch and reward_manager_name == "gtpo":
+                            print("🔄 GTPO: Reusing pre-computed entropy data for log_prob")
+                            old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                            entropys = batch.batch["entropys"]  # Use pre-computed entropy
+                        else:
+                            old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                            entropys = old_log_prob.batch["entropys"]
+                            
                         response_masks = batch.batch["response_mask"]
                         loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
                         entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
                         old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
                         metrics.update(old_log_prob_metrics)
-                        old_log_prob.batch.pop("entropys")
+                        
+                        # For GTPO, keep entropy data for advantage computation
+                        if reward_manager_name == "gtpo":
+                            print("🔄 GTPO: Preserving entropy data for advantage computation")
+                            if "entropys" in old_log_prob.batch:
+                                old_log_prob.batch.pop("entropys")  # Remove from old_log_prob to avoid duplication
+                        else:
+                            old_log_prob.batch.pop("entropys", None)  # Remove entropy for non-GTPO
+                            
                         batch = batch.union(old_log_prob)
 
                     if self.use_reference_policy:
@@ -262,8 +306,20 @@ class RayDAPOTrainer(RayPPOTrainer):
                             batch = batch.union(values)
 
                     with marked_timer("adv", timing_raw, "brown"):
+                        print(f"\n🚀 STARTING ADVANTAGE COMPUTATION")
+                        print(f"📊 Batch info: {len(batch)} sequences")
+                        print(f"⚙️  Algorithm config: adv_estimator={self.config.algorithm.adv_estimator}")
+                        
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
+                        
+                        # Extract algorithm config for advantage computation
+                        algorithm_config = {
+                            "norm_adv_by_std_in_grpo": norm_adv_by_std_in_grpo,
+                        }
+                        print(f"🎯 Algorithm config passed to advantage computation: {algorithm_config}")
+                        print(f"📊 Using loss_agg_mode={self.config.actor_rollout_ref.actor.loss_agg_mode} for token-level weighting")
+                        
                         batch = compute_advantage(
                             batch,
                             adv_estimator=self.config.algorithm.adv_estimator,
@@ -271,7 +327,10 @@ class RayDAPOTrainer(RayPPOTrainer):
                             lam=self.config.algorithm.lam,
                             num_repeat=self.config.actor_rollout_ref.rollout.n,
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                            config=algorithm_config,
                         )
+                        
+                        print(f"✅ ADVANTAGE COMPUTATION COMPLETED!")
 
                     # update critic
                     if self.use_critic:

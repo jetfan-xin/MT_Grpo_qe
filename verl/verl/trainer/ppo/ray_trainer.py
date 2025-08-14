@@ -237,6 +237,10 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
                 config.get("pf_ppo_weight_pow", 2.0),
             )
     elif adv_estimator == AdvantageEstimator.GRPO:
+        print(f"\n🎯 GRPO ADVANTAGE ESTIMATION - Starting computation")
+        print(f"📊 Input shapes: token_rewards={data.batch['token_level_rewards'].shape}")
+        print(f"⚙️  Parameters: norm_by_std={norm_adv_by_std_in_grpo}, multi_turn={multi_turn}")
+        
         # Initialize the mask for GRPO calculation
         grpo_calculation_mask = data.batch["response_mask"]
         if multi_turn:
@@ -245,6 +249,13 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
             response_length = grpo_calculation_mask.size(1)
             # This mask is the one intended for GRPO
             grpo_calculation_mask = data.batch["loss_mask"][:, -response_length:]
+            print(f"🔄 Multi-turn mode: using loss_mask[:, -{response_length}:]")
+        
+        print(f"📋 Response mask shape: {grpo_calculation_mask.shape}")
+        print(f"🏷️  Unique UIDs: {len(set(data.non_tensor_batch['uid']))}")
+        
+        print(f"🎯 Using standard GRPO (sequence-level baseline with loss aggregation)")
+        
         # Call compute_grpo_outcome_advantage with parameters matching its definition
         advantages, returns = core_algos.compute_grpo_outcome_advantage(
             token_level_rewards=data.batch["token_level_rewards"],
@@ -254,6 +265,12 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+        
+        print(f"✅ GRPO computation completed!")
+        print(f"📊 Advantages shape: {advantages.shape}, non-zero: {(advantages != 0).sum()}")
+        print(f"📈 Advantages stats: min={advantages.min():.6f}, max={advantages.max():.6f}, mean={advantages.mean():.6f}")
+        print(f"📊 Returns shape: {returns.shape}, non-zero: {(returns != 0).sum()}")
+        print(f"📈 Returns stats: min={returns.min():.6f}, max={returns.max():.6f}, mean={returns.mean():.6f}")
     else:
         # handle all other adv estimator type other than GAE and GRPO
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)

@@ -33,6 +33,8 @@ class DAPORewardManager:
         reward_fn_key="data_source",
         max_resp_len=None,
         overlong_buffer_cfg=None,
+        # BATCH_MODIFICATION: Add batch processing parameters like BatchRewardManager
+        **reward_kwargs,
     ) -> None:
         self.tokenizer = tokenizer
         self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
@@ -40,9 +42,54 @@ class DAPORewardManager:
         self.reward_fn_key = reward_fn_key
         self.overlong_buffer_cfg = overlong_buffer_cfg
         self.max_resp_len = max_resp_len
+        # BATCH_MODIFICATION: Store additional reward kwargs for batch processing
+        self.reward_kwargs = reward_kwargs
 
         if self.overlong_buffer_cfg is not None:
             assert self.max_resp_len is not None, f"max_resp_len must be provided if {overlong_buffer_cfg=}, but got None"
+
+    # BATCH_MODIFICATION: Add batch preprocessing method like BatchRewardManager
+    def _prepare_batch_data(self, data: DataProto):
+        """Extract and preprocess all data for batch processing"""
+        prompt_ids = data.batch["prompts"]
+        response_ids = data.batch["responses"]
+        attention_mask = data.batch["attention_mask"]
+
+        prompt_len = prompt_ids.shape[-1]
+        valid_response_lengths = attention_mask[:, prompt_len:].sum(dim=-1)
+
+        # Batch decode responses
+        responses_str = []
+        prompts_str = []
+        for i in range(len(data)):
+            # Get valid prompt
+            valid_prompt_length = attention_mask[i, :prompt_len].sum()
+            valid_prompt_ids = prompt_ids[i, -valid_prompt_length:]
+            prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=True)
+            prompts_str.append(prompt_str)
+            
+            # Get valid response
+            valid_len = valid_response_lengths[i]
+            valid_response_ids = response_ids[i, :valid_len]
+            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+            eos_token = self.tokenizer.eos_token
+            if response_str.endswith(eos_token):
+                response_str = response_str[:-len(eos_token)]
+            responses_str.append(response_str)
+
+        # Extract other batch data
+        ground_truths = [item.non_tensor_batch["reward_model"]["ground_truth"] for item in data]
+        data_sources = [item.non_tensor_batch[self.reward_fn_key] for item in data]
+        extra_infos = [item.non_tensor_batch.get("extra_info", None) for item in data]
+
+        return {
+            'responses_str': responses_str,
+            'prompts_str': prompts_str, 
+            'ground_truths': ground_truths,
+            'data_sources': data_sources,
+            'extra_infos': extra_infos,
+            'valid_response_lengths': valid_response_lengths
+        }
 
     def __call__(self, data: DataProto, return_dict: bool = False):
         """We will expand this function gradually based on the available datasets"""
@@ -57,54 +104,56 @@ class DAPORewardManager:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_extra_info = defaultdict(list)
 
-        already_print_data_sources = {}
-
-        for i in range(len(data)):
-            data_item = data[i]  # DataProtoItem
-
-            prompt_ids = data_item.batch["prompts"]
-
-            prompt_length = prompt_ids.shape[-1]
-
-            valid_prompt_length = data_item.batch["attention_mask"][:prompt_length].sum()
-            valid_prompt_ids = prompt_ids[-valid_prompt_length:]
-
-            response_ids = data_item.batch["responses"]
-            valid_response_length = data_item.batch["attention_mask"][prompt_length:].sum()
-            valid_response_ids = response_ids[:valid_response_length]
-
-            # decode
-            prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=True)
-            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
-            eos_token = self.tokenizer.eos_token
-            if response_str.endswith(eos_token):
-                response_str = response_str[: -len(eos_token)]
-
-            ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
-
-            data_source = data_item.non_tensor_batch[self.reward_fn_key]
-
-            extra_info = data_item.non_tensor_batch.get("extra_info", None)
-
-            result = self.compute_score(
-                data_source=data_source,
-                solution_str=response_str,
-                ground_truth=ground_truth,
-                extra_info=extra_info,
+        # BATCH_MODIFICATION: Use batch processing approach
+        batch_data = self._prepare_batch_data(data)
+        
+        # BATCH_MODIFICATION: Try batch processing first, fall back to individual if needed
+        try:
+            # Check if compute_score supports batch processing (like your compute_score_batch)
+            batch_result = self.compute_score(
+                data_sources=batch_data['data_sources'],
+                solution_strs=batch_data['responses_str'],
+                ground_truths=batch_data['ground_truths'],
+                extra_infos=batch_data['extra_infos'],
+                **self.reward_kwargs
             )
+            print(f"BATCH_MODIFICATION: Using BATCH processing for {len(batch_data['responses_str'])} items")
+            
+            # Handle batch results
+            scores = batch_result if isinstance(batch_result, list) else [batch_result] * len(data)
+            
+        except Exception as batch_error:
+            print(f"BATCH_MODIFICATION: Batch processing failed ({batch_error}), falling back to individual processing")
+            # Fall back to individual processing
+            scores = []
+            for i in range(len(data)):
+                try:
+                    result = self.compute_score(
+                        data_source=batch_data['data_sources'][i],
+                        solution_str=batch_data['responses_str'][i],
+                        ground_truth=batch_data['ground_truths'][i],
+                        extra_info=batch_data['extra_infos'][i],
+                    )
+                    if isinstance(result, dict):
+                        score = result["score"]
+                        # Store the information including original reward
+                        for key, value in result.items():
+                            reward_extra_info[key].append(value)
+                    else:
+                        score = result
+                    scores.append(score)
+                except Exception as individual_error:
+                    print(f"BATCH_MODIFICATION: Individual processing failed for item {i}: {individual_error}")
+                    scores.append(0.0)  # Default score on error
 
-            score: float
-            if isinstance(result, dict):
-                score = result["score"]
-                # Store the information including original reward
-                for key, value in result.items():
-                    reward_extra_info[key].append(value)
-            else:
-                score = result
-
+        # BATCH_MODIFICATION: Process scores and apply overlong buffer in batch
+        already_print_data_sources = {}
+        for i, score in enumerate(scores):
             reward = score
-
-            if self.overlong_buffer_cfg.enable:
+            valid_response_length = batch_data['valid_response_lengths'][i]
+            
+            # BATCH_MODIFICATION: Apply overlong buffer logic (keeping DAPO's special feature)
+            if self.overlong_buffer_cfg and self.overlong_buffer_cfg.enable:
                 overlong_buffer_len = self.overlong_buffer_cfg.len
                 expected_len = self.max_resp_len - overlong_buffer_len
                 exceed_len = valid_response_length - expected_len
@@ -117,19 +166,17 @@ class DAPORewardManager:
 
             reward_tensor[i, valid_response_length - 1] = reward
 
+            # BATCH_MODIFICATION: Maintain printing logic
+            data_source = batch_data['data_sources'][i]
             if data_source not in already_print_data_sources:
                 already_print_data_sources[data_source] = 0
 
             if already_print_data_sources[data_source] < self.num_examine:
                 already_print_data_sources[data_source] += 1
-                print("[prompt]", prompt_str)
-                print("[response]", response_str)
-                print("[ground_truth]", ground_truth)
-                if isinstance(result, dict):
-                    for key, value in result.items():
-                        print(f"[{key}]", value)
-                else:
-                    print("[score]", score)
+                print("[prompt]", batch_data['prompts_str'][i])
+                print("[response]", batch_data['responses_str'][i])
+                print("[ground_truth]", batch_data['ground_truths'][i])
+                print("[score]", score)
 
         if return_dict:
             return {
