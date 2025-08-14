@@ -136,12 +136,12 @@ def compute_score_single(data_source, solution_str, ground_truth, extra_info=Non
     
     if not format_score:  
         print("invalid format")
-        return -2.0  # 格式错误惩罚  
+        return -3.0  # 格式错误惩罚，与batch版本保持一致  
     
     answer_text = extract_solution(solution_str)
     if answer_text is  None:
         print("format score is 1.0 but no <translate> tag found in completion: ", solution_str)
-        return -2.0
+        return -3.0
 
     bleu_score = compute_bleu(lg_pair, ground_truth, answer_text)  
     
@@ -197,6 +197,17 @@ def compute_score(*args, **kwargs):
         solution_str = args[1] 
         ground_truth = args[2]
         extra_info = args[3] if len(args) > 3 else kwargs.get('extra_info', None)
+        
+        return compute_score_single(data_source, solution_str, ground_truth, extra_info)
+    
+    # Check if this is single item with keyword arguments (DAPO style)
+    elif 'data_source' in kwargs and 'solution_str' in kwargs and 'ground_truth' in kwargs:
+        # Single item with keyword arguments
+        print("Using SINGLE processing for 1 item (keyword args)")
+        data_source = kwargs['data_source']
+        solution_str = kwargs['solution_str']
+        ground_truth = kwargs['ground_truth']
+        extra_info = kwargs.get('extra_info', None)
         
         return compute_score_single(data_source, solution_str, ground_truth, extra_info)
     
