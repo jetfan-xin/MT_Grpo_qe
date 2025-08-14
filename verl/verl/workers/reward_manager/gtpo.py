@@ -75,22 +75,25 @@ class GTPORewardManager:
             entropy_bonus: Bonus for each token (bs, response_len)
         """
         with torch.no_grad():
-            print(f"\n🔍 GTPO GROUP-WISE: {response_mask.shape[0]} seqs, beta={self.entropy_beta}")
-            
-            # Get prompt UIDs to group sequences
+            # Get prompt UIDs to group sequences (if available)
             if "uid" not in data.non_tensor_batch:
-                raise ValueError("GTPO requires 'uid' in non_tensor_batch to identify prompt groups")
+                # Fallback: treat each sequence as its own group (dt=1 for successful sequences)
+                uids = [f"val_seq_{i}" for i in range(len(base_rewards))]
+                is_validation = True
+            else:
+                uids = data.non_tensor_batch["uid"]
+                is_validation = False
             
-            uids = data.non_tensor_batch["uid"]
             num_groups = len(set(uids))
             
             # Create successful sequence mask (reward > 0, as requested by user)
             successful_mask = base_rewards > 0  # (bs,)
             num_successful = successful_mask.sum()
-            print(f"🎯 Groups: {num_groups}, Successful: {num_successful}/{len(base_rewards)} (reward: {base_rewards.min():.3f}~{base_rewards.max():.3f})")
+            
+            mode = "VAL" if is_validation else "TRAIN"
+            print(f"🔍 GTPO [{mode}]: {len(base_rewards)} seqs, {num_groups} groups, {num_successful} successful")
             
             if num_successful == 0:
-                print("⚠️  No successful sequences! Returning zeros.")
                 return torch.zeros_like(response_mask, dtype=torch.float32)
             
             # Extract token entropy
@@ -98,15 +101,11 @@ class GTPORewardManager:
             
             # Apply attention mask to entropy
             token_entropy = token_entropy * response_mask
-            print(f"📊 Entropy: {token_entropy.shape}, sum={token_entropy.sum():.1f}")
             
             # Group sequences by UID
             uid_to_indices = defaultdict(list)
             for idx, uid in enumerate(uids):
                 uid_to_indices[uid].append(idx)
-            
-            group_sizes = [len(indices) for indices in uid_to_indices.values()]
-            print(f"📊 Group sizes: {min(group_sizes)}~{max(group_sizes)} (avg={sum(group_sizes)/len(group_sizes):.1f})")
             
             # Initialize entropy bonus
             bs, response_len = token_entropy.shape
@@ -122,11 +121,6 @@ class GTPORewardManager:
                 group_response_mask = response_mask[seq_indices]
                 
                 num_successful_in_group = group_successful_mask.sum().item()
-                
-                # Debug first group only
-                if group_id == 0:
-                    print(f"🔍 Group 0 sample: {len(seq_indices)} seqs, {num_successful_in_group} successful")
-                    print(f"   Rewards: {group_base_rewards.tolist()}")
                 
                 # Skip groups with no successful sequences
                 if num_successful_in_group == 0:
@@ -160,13 +154,6 @@ class GTPORewardManager:
                                     entropy_bonus[global_idx, t] = group_entropy_bonus_t[local_idx]
                                 # Unsuccessful sequences keep entropy_bonus[global_idx, t] = 0
                             
-                            # Debug logging for first group and key time steps only
-                            if group_id == 0 and t == 0:
-                                successful_entropies = group_entropy_t[group_successful_active_mask_t.bool()]
-                                active_bonuses = group_entropy_bonus_t[group_active_mask_t.bool()]
-                                print(f"   t=0 sample: dt={dt_group.int()}, entropy_sum={entropy_sum_group_t:.3f}")
-                                print(f"   Successful entropies: {[f'{x:.2f}' for x in successful_entropies[:3].tolist()]}...")
-                                print(f"   Active bonuses: {[f'{x:.2f}' for x in active_bonuses[:3].tolist()]}...")
                         else:
                             # Uniform bonus within this group (only for successful sequences)
                             uniform_bonus = self.entropy_beta
@@ -188,17 +175,11 @@ class GTPORewardManager:
                     })
             
             # Summary statistics
-            total_bonus = entropy_bonus.sum()
-            active_bonuses = entropy_bonus[response_mask.bool()]
-            
-            print(f"📊 SUMMARY: {len(uid_to_indices)} groups processed, total_bonus={total_bonus:.1f}")
-            if len(active_bonuses) > 0:
-                print(f"   Bonus stats: mean={active_bonuses.mean():.4f}, range=[{active_bonuses.min():.4f}, {active_bonuses.max():.4f}]")
-            
-            # Show dt statistics to verify correctness
             dt_values = [stats['max_dt'] for stats in group_stats]
             if dt_values:
-                print(f"🎯 dt range: [{min(dt_values)}, {max(dt_values)}] (should be ≤16) ✅")
+                max_dt = max(dt_values)
+                avg_dt = sum(dt_values) / len(dt_values)
+                print(f"📊 Entropy bonus applied, dt_range=[1,{max_dt}], avg_dt={avg_dt:.1f}")
             
             return entropy_bonus
 
@@ -210,19 +191,15 @@ class GTPORewardManager:
             prompt_len = data.batch["prompts"].shape[-1]
             response_len = response_mask.shape[-1]
             
-            print(f"✅ Using pre-computed entropy: {entropys.shape}, range=[{entropys.min():.3f}, {entropys.max():.3f}]")
-            
             # Check entropy shape to determine if it includes prompt or not
             if entropys.shape[-1] == prompt_len + response_len:
                 token_entropy = entropys[:, prompt_len:]  # Extract response part
-                print(f"🔄 Extracted response entropy: {token_entropy.shape}")
             elif entropys.shape[-1] == response_len:
                 token_entropy = entropys
             else:
                 # Unexpected shape, try to handle gracefully
                 if entropys.shape[-1] >= response_len:
                     token_entropy = entropys[:, -response_len:]
-                    print(f"🔧 Using last {response_len} tokens from entropy")
                 else:
                     raise ValueError(f"GTPO: Cannot extract response entropy from shape {entropys.shape}")
             
@@ -237,13 +214,10 @@ class GTPORewardManager:
             log_probs = F.log_softmax(response_logits, dim=-1)
             token_entropy = -(probs * log_probs).sum(dim=-1)  # (bs, response_len)
             
-            print(f"🧮 Computed entropy from logits: {token_entropy.shape}, range=[{token_entropy.min():.3f}, {token_entropy.max():.3f}]")
-            
         # Method 3: Fallback to uniform entropy
         else:
             bs, response_len = response_mask.shape
             token_entropy = torch.ones(bs, response_len, device=response_mask.device)
-            print(f"⚠️  Using uniform entropy: {token_entropy.shape}")
         
         return token_entropy
 
@@ -352,17 +326,13 @@ class GTPORewardManager:
         entropy_bonus = self._compute_entropy_bonus(data, response_mask, base_rewards)
         
         # GTPO: Apply entropy-weighted token-level rewards
-        print(f"\n🎯 APPLYING GTPO REWARDS to {len(scores)} sequences")
-        
         already_print_data_sources = {}
+        successful_count = 0
+        total_token_rewards = 0.0
+        
         for i, score in enumerate(scores):
             base_reward = score
             valid_response_length = batch_data['valid_response_lengths'][i]
-            
-            # Only debug first few sequences and some scattered ones
-            should_debug = (i < 2) or (i % 50 == 0)
-            if should_debug:
-                print(f"\n🔄 Seq {i}: reward={base_reward:.3f}, len={valid_response_length}")
             
             # Apply overlong buffer logic if enabled
             if self.overlong_buffer_cfg and self.overlong_buffer_cfg.enable:
@@ -372,8 +342,6 @@ class GTPORewardManager:
                 overlong_penalty_factor = self.overlong_buffer_cfg.penalty_factor
                 overlong_reward = min(-exceed_len / overlong_buffer_len * overlong_penalty_factor, 0)
                 base_reward += overlong_reward
-                if should_debug:
-                    print(f"   Overlong penalty: {overlong_reward:.3f}")
                 if self.overlong_buffer_cfg.log:
                     reward_extra_info["overlong_reward"].append(overlong_reward)
                     reward_extra_info["overlong"].append(overlong_reward < 0)
@@ -385,8 +353,7 @@ class GTPORewardManager:
             
             if is_successful:
                 # For successful sequences: apply full GTPO formula r̃i,t = ri + entropy_bonus
-                if should_debug:
-                    print(f"✅ SUCCESSFUL: applying base_reward={base_reward:.3f} to ALL tokens")
+                successful_count += 1
                 
                 # GTPO Formula: Each token gets the FULL base reward + its entropy bonus
                 entropy_bonus_seq = entropy_bonus[i, :valid_response_length]
@@ -395,18 +362,10 @@ class GTPORewardManager:
                 
             else:
                 # For unsuccessful sequences: r̃i,t := 0 for all tokens (paper requirement)
-                if should_debug:
-                    print(f"❌ UNSUCCESSFUL: setting all tokens to 0")
                 token_rewards = torch.zeros(valid_response_length, device=reward_tensor.device)
                 entropy_bonus_seq = torch.zeros(valid_response_length, device=reward_tensor.device)
             
-            # Debug output for selected sequences
-            if should_debug:
-                print(f"   Final: token_sum={token_rewards.sum():.3f}, bonus_range=[{entropy_bonus_seq.min():.3f}, {entropy_bonus_seq.max():.3f}]")
-                
-                # Show a few token examples
-                if is_successful and valid_response_length >= 3:
-                    print(f"   Token samples: [0]={token_rewards[0]:.3f}, [mid]={token_rewards[valid_response_length//2]:.3f}, [last]={token_rewards[-1]:.3f}")
+            total_token_rewards += token_rewards.sum().item()
             
             reward_tensor[i, :valid_response_length] = token_rewards
             
@@ -416,24 +375,17 @@ class GTPORewardManager:
             reward_extra_info["entropy_bonus_mean"].append(entropy_bonus_seq.mean().cpu().item())
             reward_extra_info["token_rewards_sum"].append(token_rewards.sum().cpu().item())
 
-            # Maintain printing logic
+            # Maintain printing logic for first few examples only
             data_source = batch_data['data_sources'][i]
             if data_source not in already_print_data_sources:
                 already_print_data_sources[data_source] = 0
 
-            if already_print_data_sources[data_source] < self.num_examine:
+            if already_print_data_sources[data_source] < min(self.num_examine, 2):  # Limit to 2 examples
                 already_print_data_sources[data_source] += 1
-                print(f"\n📝 DETAILED EXAMPLE {data_source}:")
-                print("[prompt]", batch_data['prompts_str'][i])
-                print("[response]", batch_data['responses_str'][i])
-                print("[ground_truth]", batch_data['ground_truths'][i])
-                print("[base_score]", score)
-                print(f"[entropy_bonus] avg: {entropy_bonus_seq.mean():.4f}, sum: {entropy_bonus_seq.sum():.4f}")
-                print(f"[total_reward] base: {base_reward:.4f}, with_bonus: {token_rewards.sum():.4f}")
-                print(f"[reward_distribution] last_token: {token_rewards[-1]:.4f}, other_avg: {token_rewards[:-1].mean():.4f}")
-                print(f"[gtpo_verification] Total tokens: {valid_response_length}, Non-zero rewards: {(token_rewards != 0).sum()}")
+                status = "SUCCESSFUL" if is_successful else "UNSUCCESSFUL"
+                print(f"\n📝 [{status}] {data_source}: base={base_reward:.3f}, tokens={valid_response_length}, sum={token_rewards.sum():.1f}")
         
-        print(f"\n📋 GTPO FINAL: total_sum={reward_tensor.sum():.1f}, non_zero={((reward_tensor != 0).sum())} positions")
+        print(f"🎯 GTPO Applied: {successful_count}/{len(scores)} successful, total_rewards={total_token_rewards:.1f}")
 
         if return_dict:
             return {
