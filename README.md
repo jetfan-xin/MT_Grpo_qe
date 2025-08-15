@@ -1,4 +1,11 @@
 # MT_Grpo
+## 2025.8.15
+训练GTPO-Qwen3b
+1. `conda activate pjh_verl`
+2. `cd verl`，然后`bash custom_gtpo_fast.sh`，训练权重保存位置在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1`
+3. 训练成功之后，还是在`verl`文件夹下面，合并模型权重，`bash merge.sh`，保存模型在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_3b_gtpo_bleu_comet_entropy_b1`
+4. 测试模型生成，在项目的根目录下（`MT_Grpo`）运行`CUDA_VISIBLE_DEVICES=0 python vllm_infer.py`，保存的结果在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b1/`
+
 ## 2025.8.3
 测试训练效果
 1. `conda activate pjh_verl`

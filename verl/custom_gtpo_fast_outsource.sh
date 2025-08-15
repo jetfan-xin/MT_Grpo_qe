@@ -1,30 +1,17 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-# 激活 Conda 环境
-echo "🔄 正在切换到 Conda 环境 pjh_verl..."
-eval "$(conda shell.bash hook)"
-conda activate pjh_verl
-
-# 检查 conda 环境是否激活成功
-if [[ "$CONDA_DEFAULT_ENV" == "pjh_verl" ]]; then
-  echo "✅ Conda 环境 pjh_verl 已成功激活！"
-else
-  echo "❌ Conda 环境激活失败！当前环境为：$CONDA_DEFAULT_ENV"
-  exit 1
-fi
-
 train_file_path=../data/train/parquet/train_base_enzh_zhen.parquet
 test_file_path=../data/test/parquet/test_base_enzh_zhen.parquet
 python3 ../data/process_data.py \
     --train_files "../data/train/json/train_zhen_6565.jsonl" "../data/train/json/train_enzh_6565.jsonl" \
     --test_files "../data/test/json/wmt23_zhen.jsonl" "../data/test/json/wmt24_enzh.jsonl" \
-    --tokenizer_path Qwen/Qwen2.5-3B \
+    --tokenizer_path /mnt/data/users/liamding/data/models/Qwen2.5-3B \
     --template_type "base" \
     --train_output_file ${train_file_path} \
     --test_output_file ${test_file_path}
 
-export WANDB_API_KEY=1526cd13c8d1f8c8529ea57f23d553b20b03451c # set your wandb api key
+export SWANLAB_API_KEY=57bftOCtg6exWFs81mtT1
 export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1
 
 adv_estimator=grpo
@@ -63,7 +50,7 @@ RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/recipe/dapo/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 # Paths
 # RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
-MODEL_PATH="Qwen/Qwen2.5-3B"
+MODEL_PATH="/mnt/data/users/liamding/data/models/Qwen2.5-3B"
 TRAIN_FILE="../data/train/parquet/train_base_enzh_zhen.parquet"
 TEST_FILE="../data/test/parquet/test_base_enzh_zhen.parquet"
 
@@ -74,7 +61,7 @@ top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
 val_top_p=0.7
 
 # Performance Related Parameter
-sp_size=8
+sp_size=4
 use_dynamic_bsz=True
 actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
 infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
@@ -84,7 +71,7 @@ gen_tp=1
 # CUDA_VISIBLE_DEVICES=0,1,2,3 ray job submit --no-wait --runtime-env="${RUNTIME_ENV}" \
 #     --working-dir "${WORKING_DIR}" \
 #     -- python3 -m recipe.dapo.main_dapo \
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m recipe.dapo.main_dapo \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python3 -m recipe.dapo.main_dapo \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${TEST_FILE}" \
     data.truncation='left' \
@@ -145,12 +132,12 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m recipe.dapo.main_dapo \
     reward_model.overlong_buffer.enable=${enable_overlong_buffer} \
     reward_model.overlong_buffer.len=${overlong_buffer_len} \
     reward_model.overlong_buffer.penalty_factor=${overlong_penalty_factor} \
-    trainer.logger=['wandb'] \
+    trainer.logger=['swanlab'] \
     trainer.n_gpus_per_node=${sp_size} \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=False \
     trainer.test_freq=5 \
     trainer.save_freq=10 \
     trainer.total_epochs=1 \
-    trainer.default_local_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1 \
+    trainer.default_local_dir=./qwen2.5_3b_gtpo_bleu_comet_entropy_b1 \
     trainer.resume_mode=auto $@ 2>&1 | tee custom_gtpo_fast.log
