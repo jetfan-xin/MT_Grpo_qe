@@ -81,12 +81,13 @@ if __name__ == "__main__":
     # Configurae the sampling parameters (for thinking mode)
     TEMPERATURE=0.2
     TOP_P=0.95
-    MAX_TOKENS=1024
+    MAX_TOKENS=2048
     BATCH_SIZE=16  # 降低batch size以匹配工作版本并减少内存使用
     sampling_params = SamplingParams(
         temperature=TEMPERATURE, 
         top_p=TOP_P, 
         max_tokens=MAX_TOKENS,
+        repetition_penalty=1.1,
         skip_special_tokens=False  # 添加这个参数以保持与工作版本一致
     )
 
@@ -122,7 +123,7 @@ if __name__ == "__main__":
         print(f"Processing file: {data_file}", lang)
         # Parse the file and translate
         save_name = data_file.split("/")[-1].replace(".jsonl", f"_mt.json")
-        save_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b1/"
+        save_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b1_rp/"
         os.makedirs(save_path, exist_ok=True)
 
         result = translate(data_file, lang, template_type='base', batch_size=BATCH_SIZE)    
