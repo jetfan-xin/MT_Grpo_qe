@@ -154,4 +154,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m recipe.dapo.main_dapo \
     trainer.save_freq=10 \
     trainer.total_epochs=1 \
     trainer.default_local_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1 \
+    trainer.validation_data_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1/validation_samples \
+    trainer.log_val_generations=100 \
     trainer.resume_mode=auto $@ 2>&1 | tee custom_gtpo_fast.log
