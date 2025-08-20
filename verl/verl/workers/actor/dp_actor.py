@@ -385,6 +385,11 @@ class DataParallelPPOActor(BasePPOActor):
             select_keys.append("loss_mask")
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
+        # Add entropy data for high-entropy token filtering
+        enable_entropy_mask = data.meta_info.get("enable_entropy_mask", False)
+        top_entropy_quantile = data.meta_info.get("top_entropy_quantile", 0.2)
+        if enable_entropy_mask:
+            select_keys.append("entropys")
         batch = data.select(batch_keys=select_keys).batch
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
 
@@ -468,6 +473,25 @@ class DataParallelPPOActor(BasePPOActor):
                         calculate_entropy = True
                     entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
 
+                    # Apply high-entropy token filtering (RLVR)
+                    final_response_mask = response_mask
+                    if enable_entropy_mask and "entropys" in data:
+                        old_entropys = data["entropys"]
+                        
+                        # Compute entropy threshold (following MS-Swift approach)
+                        valid_entropys = old_entropys[response_mask.bool()]
+                        if len(valid_entropys) > 0:
+                            entropy_threshold = torch.nanquantile(valid_entropys.float(), 1 - top_entropy_quantile)
+                            high_entropy_mask = (old_entropys >= entropy_threshold) & response_mask.bool()
+                            
+                            # Apply entropy mask to response mask (this filters out low-entropy tokens from loss)
+                            final_response_mask = response_mask * high_entropy_mask.float()
+                            
+                            num_high_entropy = high_entropy_mask.sum().item()
+                            total_tokens = response_mask.sum().item()
+                            print(f"🎯 High-entropy filtering: {num_high_entropy}/{total_tokens} tokens "
+                                  f"({num_high_entropy/total_tokens*100:.1f}%) selected for loss computation")
+
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
                     if self.config.policy_loss.loss_mode == "vanilla":
@@ -475,7 +499,7 @@ class DataParallelPPOActor(BasePPOActor):
                             old_log_prob=old_log_prob,
                             log_prob=log_prob,
                             advantages=advantages,
-                            response_mask=response_mask,
+                            response_mask=final_response_mask,  # Use filtered mask
                             cliprange=clip_ratio,
                             cliprange_low=clip_ratio_low,
                             cliprange_high=clip_ratio_high,
@@ -484,10 +508,10 @@ class DataParallelPPOActor(BasePPOActor):
                         )
                     else:
                         policy_loss_fn = get_policy_loss_fn(loss_mode)
-                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(old_log_prob, log_prob, advantages, response_mask, loss_agg_mode, self.config)
+                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(old_log_prob, log_prob, advantages, final_response_mask, loss_agg_mode, self.config)  # Use filtered mask
 
                     if entropy_coeff != 0:
-                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=final_response_mask, loss_agg_mode=loss_agg_mode)  # Use filtered mask
 
                         # compute policy loss
                         policy_loss = pg_loss - entropy_loss * entropy_coeff
@@ -498,7 +522,7 @@ class DataParallelPPOActor(BasePPOActor):
                         ref_log_prob = data["ref_log_prob"]
                         # compute kl loss
                         kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
-                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        kl_loss = agg_loss(loss_mat=kld, loss_mask=final_response_mask, loss_agg_mode=loss_agg_mode)  # Use filtered mask
 
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
                         metrics["actor/kl_loss"] = kl_loss.detach().item()

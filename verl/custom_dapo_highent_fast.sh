@@ -16,6 +16,10 @@ export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1
 
 adv_estimator=grpo
 
+# High-entropy token filtering (RLVR)
+enable_entropy_mask=true
+top_entropy_quantile=0.2  # Top 20% high-entropy tokens (consistent with MS-Swift)
+
 use_kl_in_reward=False
 kl_coef=0.0
 use_kl_loss=False
@@ -78,6 +82,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 -m recipe.dapo.main_dapo \
     data.train_batch_size=${train_prompt_bsz} \
     actor_rollout_ref.rollout.n=${n_resp_per_prompt} \
     algorithm.adv_estimator=${adv_estimator} \
+    algorithm.enable_entropy_mask=${enable_entropy_mask} \
+    algorithm.top_entropy_quantile=${top_entropy_quantile} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
     actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \

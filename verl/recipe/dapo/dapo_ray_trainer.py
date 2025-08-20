@@ -283,13 +283,17 @@ class RayDAPOTrainer(RayPPOTrainer):
                         old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
                         metrics.update(old_log_prob_metrics)
                         
-                        # For GTPO, keep entropy data for advantage computation
-                        if reward_manager_name == "gtpo":
-                            print("🔄 GTPO: Preserving entropy data for advantage computation")
-                            if "entropys" in old_log_prob.batch:
-                                old_log_prob.batch.pop("entropys")  # Remove from old_log_prob to avoid duplication
+                        # For GTPO or high-entropy filtering, keep entropy data
+                        enable_entropy_mask = self.config.algorithm.get("enable_entropy_mask", False)
+                        if reward_manager_name == "gtpo" or enable_entropy_mask:
+                            if reward_manager_name == "gtpo":
+                                print("🔄 GTPO: Preserving entropy data for advantage computation")
+                            if enable_entropy_mask:
+                                print("🔄 High-entropy filtering: Preserving entropy data for loss masking")
+                            # Keep entropy data in batch for loss computation
+                            # Do NOT remove entropys from old_log_prob, so it gets added to batch
                         else:
-                            old_log_prob.batch.pop("entropys", None)  # Remove entropy for non-GTPO
+                            old_log_prob.batch.pop("entropys", None)  # Remove entropy for other algorithms
                             
                         batch = batch.union(old_log_prob)
 
@@ -329,6 +333,13 @@ class RayDAPOTrainer(RayPPOTrainer):
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=algorithm_config,
                         )
+                        
+                        # Add high-entropy filtering configuration to batch metadata
+                        enable_entropy_mask = self.config.algorithm.get("enable_entropy_mask", False)
+                        if enable_entropy_mask:
+                            batch.meta_info["enable_entropy_mask"] = True
+                            batch.meta_info["top_entropy_quantile"] = self.config.algorithm.get("top_entropy_quantile", 0.2)
+                            print(f"🎯 High-entropy filtering enabled: top_{batch.meta_info['top_entropy_quantile']:.1%} tokens")
                         
                         print(f"✅ ADVANTAGE COMPUTATION COMPLETED!")
 
