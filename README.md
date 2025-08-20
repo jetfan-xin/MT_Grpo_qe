@@ -1,4 +1,10 @@
 # MT_Grpo
+## 2025.8.20
+用api试一下qwen3推理模型和r1，在没有限制条件让它自己做翻译的指令下，思考过程和结果是如何的
+1. `cd api`
+2. `python api_r1_qwen3.py --terminal 1`，这是运行deepseek-r1，保存路径`/mnt/workspace/xintong/pjh/All_result/mt_grpo/deepseek-r1无限制指令-{today}/`
+2. `python api_r1_qwen3.py --terminal 2`，这是运行qwen3-235b-a22b，保存路径`/mnt/workspace/xintong/pjh/All_result/mt_grpo/qwen3-235b-a22b无限制指令-{today}/`
+
 ## 2025.8.17
 重新测试训练模型
 1. `conda activate pjh_verl`
