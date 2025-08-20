@@ -1,9 +1,14 @@
 # MT_Grpo
 ## 2025.8.20
-用api试一下qwen3推理模型和r1，在没有限制条件让它自己做翻译的指令下，思考过程和结果是如何的
+### 用api试一下qwen3推理模型和r1，在没有限制条件让它自己做翻译的指令下，思考过程和结果是如何的
 1. `cd api`
 2. `python api_r1_qwen3.py --terminal 1`，这是运行deepseek-r1，保存路径`/mnt/workspace/xintong/pjh/All_result/mt_grpo/deepseek-r1无限制指令-{today}/`
 2. `python api_r1_qwen3.py --terminal 2`，这是运行qwen3-235b-a22b，保存路径`/mnt/workspace/xintong/pjh/All_result/mt_grpo/qwen3-235b-a22b无限制指令-{today}/`
+### 再次尝试GTPO，上次用的是beta=1，这次用更小的比重beta=0.3
+1. `conda activate pjh_verl`
+2. `cd verl`，然后`bash custom_gtpo_fast.sh`，训练权重保存位置在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b03`
+3. 训练成功之后，还是在`verl`文件夹下面，合并模型权重，`bash merge.sh`，保存模型在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_3b_gtpo_bleu_comet_entropy_b03`
+4. 测试模型生成，在项目的根目录下（`MT_Grpo`）运行`CUDA_VISIBLE_DEVICES=0 python vllm_infer.py`，保存的结果在`/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b03/`
 
 ## 2025.8.17
 重新测试训练模型

@@ -55,7 +55,7 @@ n_resp_per_prompt=16
 train_prompt_mini_bsz=32
 
 # GTPO-specific parameters
-entropy_beta=1.0
+entropy_beta=0.3
 
 # Ray
 # RAY_ADDRESS=${RAY_ADDRESS:-"http://localhost:8265"}
@@ -153,7 +153,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m recipe.dapo.main_dapo \
     trainer.test_freq=5 \
     trainer.save_freq=10 \
     trainer.total_epochs=1 \
-    trainer.default_local_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1 \
-    trainer.validation_data_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b1/validation_samples \
+    trainer.default_local_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b03 \
+    trainer.validation_data_dir=/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/qwen2.5_3b_gtpo_bleu_comet_entropy_b03/validation_samples \
     trainer.log_val_generations=100 \
-    trainer.resume_mode=auto $@ 2>&1 | tee custom_gtpo_fast.log
+    trainer.resume_mode=auto $@ 2>&1 | tee custom_gtpo_fast_b03.log

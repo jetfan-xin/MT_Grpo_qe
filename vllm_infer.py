@@ -87,12 +87,12 @@ if __name__ == "__main__":
         temperature=TEMPERATURE, 
         top_p=TOP_P, 
         max_tokens=MAX_TOKENS,
-        repetition_penalty=1.1,
+        # repetition_penalty=1.1,
         skip_special_tokens=False  # 添加这个参数以保持与工作版本一致
     )
 
     # Initialize the vLLM engine
-    model_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_3b_gtpo_bleu_comet_entropy_b1"
+    model_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_xwang/merge_model/qwen2.5_3b_gtpo_bleu_comet_entropy_b03"
     llm = LLM(
         model=model_path,
         tensor_parallel_size=1,
@@ -123,7 +123,7 @@ if __name__ == "__main__":
         print(f"Processing file: {data_file}", lang)
         # Parse the file and translate
         save_name = data_file.split("/")[-1].replace(".jsonl", f"_mt.json")
-        save_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b1_rp/"
+        save_path = "/mnt/workspace/xintong/pjh/All_result/mt_grpo/verl_grpo_result/qwen2.5_3b_gtpo_bleu_comet_entropy_b03/"
         os.makedirs(save_path, exist_ok=True)
 
         result = translate(data_file, lang, template_type='base', batch_size=BATCH_SIZE)    
