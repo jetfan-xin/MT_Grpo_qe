@@ -581,7 +581,16 @@ class RayPPOTrainer:
 
         lines = []
         for i in range(n):
-            entry = {k: v[i] for k, v in base_data.items()}
+            # entry = {k: v[i] for k, v in base_data.items()}
+            entry = {}
+            for k, v in base_data.items():
+                val = v[i]
+                # Convert PyTorch tensors to Python scalars
+                if hasattr(val, 'cpu') and hasattr(val, 'item'):
+                    val = val.cpu().item()
+                elif hasattr(val, 'tolist'):
+                    val = val.tolist()
+                entry[k] = val
             lines.append(json.dumps(entry, ensure_ascii=False))
 
         with open(filename, "w") as f:
