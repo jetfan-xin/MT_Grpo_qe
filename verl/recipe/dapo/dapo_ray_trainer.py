@@ -192,6 +192,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                         batch = new_batch
                     else:  # NOTE: When prompts after filtering is less than train batch size,
                         # we skip to the next generation batch
+                        print("non_tensor_batch keys:", list(new_batch.non_tensor_batch.keys()))
                         metric_name = self.config.algorithm.filter_groups.metric
                         if metric_name == "seq_final_reward":
                             # Turn to numpy for easier filtering
@@ -204,6 +205,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                         for uid, metric_val in zip(new_batch.non_tensor_batch["uid"], new_batch.non_tensor_batch[metric_name]):
                             prompt_uid2metric_vals[uid].append(metric_val)
 
+                         # 组内方差过滤
                         prompt_uid2metric_std = {}
                         filtered_groups = []
                         for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
@@ -222,7 +224,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                         if filtered_groups:
                             print(f"\n[Filter Groups] Filtering {len(filtered_groups)} groups with identical {metric_name} values:")
                             for group in filtered_groups:
-                                print(f"  - UID: {group['uid']}, Count: {group['count']}, {group['metric_name']}: {group['metric_val']:.4f}")
+                                print(f"  - UID: {group['uid']}, Count: {group['count']}, {group['metric_name']}: {group['metric_val']:.4f}") # 基本上都是全体format不符合要求的组 - UID: 56c2928a-5087-4c56-ab2d-abd926184a00, Count: 12, seq_reward: -3.0000
                             print()
 
                         kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
@@ -266,7 +268,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
-                    # recompute old_log_probs
+                    # recompute old_log_probs-->ratio 的计算
                     with marked_timer("old_log_prob", timing_raw, "blue"):
                         # Check if we already have entropy data (from GTPO pre-computation)
                         if "entropys" in batch.batch and reward_manager_name == "gtpo":
@@ -309,7 +311,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
-                    with marked_timer("adv", timing_raw, "brown"):
+                    with marked_timer("adv", timing_raw, "brown"): # 得到seq_level的优势函数值
                         print(f"\n🚀 STARTING ADVANTAGE COMPUTATION")
                         print(f"📊 Batch info: {len(batch)} sequences")
                         print(f"⚙️  Algorithm config: adv_estimator={self.config.algorithm.adv_estimator}")
@@ -334,7 +336,7 @@ class RayDAPOTrainer(RayPPOTrainer):
                             config=algorithm_config,
                         )
                         
-                        # Add high-entropy filtering configuration to batch metadata
+                        # Add high-entropy filtering configuration to batch metadata 高熵过滤
                         enable_entropy_mask = self.config.algorithm.get("enable_entropy_mask", False)
                         if enable_entropy_mask:
                             batch.meta_info["enable_entropy_mask"] = True

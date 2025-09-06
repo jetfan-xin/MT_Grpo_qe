@@ -394,7 +394,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         else:
             actor_optimizer = None
             actor_lr_scheduler = None
-
+        
         return actor_module_fsdp, actor_optimizer, actor_lr_scheduler, actor_model_config
 
     def _build_rollout(self, trust_remote_code=False):
