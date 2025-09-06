@@ -13,8 +13,7 @@
 /outputs/
 /results/
 
-# sub-repo
-/wmt22-comet-legacy/
+
 
 echo "wmt22-comet-legacy/" >> .gitignore
 echo "ckpts/" >> .gitignore
