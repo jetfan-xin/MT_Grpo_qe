@@ -22,3 +22,15 @@ echo "*.ckpt" >> .gitignore
 echo "*.bin" >> .gitignore
 echo "*.safetensors" >> .gitignore
 echo "verl/*.whl" >> .gitignore
+
+# checkpoints & large artifacts
+ckpts/
+verl/*.whl
+
+# accidental SSH key outputs from earlier command typo
+eval "$(ssh-agent -s)"
+eval "$(ssh-agent -s)".pub
+
+# python cache
+__pycache__/
+*.pyc
