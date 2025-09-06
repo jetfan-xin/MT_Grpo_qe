@@ -1,0 +1,18 @@
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+megatron-core 0.12.0rc3 requires flask-restful, which is not installed.
+megatron-core 0.12.0rc3 requires nltk, which is not installed.
+megatron-core 0.12.0rc3 requires nvidia-modelopt[torch]>=0.23.2; sys_platform != "darwin", which is not installed.
+megatron-core 0.12.0rc3 requires pytest-cov, which is not installed.
+megatron-core 0.12.0rc3 requires pytest_mock, which is not installed.
+megatron-core 0.12.0rc3 requires pytest-random-order, which is not installed.
+megatron-core 0.12.0rc3 requires tensorstore!=0.1.46,!=0.1.72, which is not installed.
+megatron-core 0.12.0rc3 requires zarr, which is not installed.
+flashinfer-python 0.2.2.post1+cu124torch2.6 requires torch==2.6.*, but you have torch 2.8.0 which is incompatible.
+opentelemetry-proto 1.26.0 requires protobuf<5.0,>=3.19, but you have protobuf 6.32.0 which is incompatible.
+torchaudio 2.6.0 requires torch==2.6.0, but you have torch 2.8.0 which is incompatible.
+torchvision 0.21.0 requires torch==2.6.0, but you have torch 2.8.0 which is incompatible.
+vllm 0.8.4 requires tokenizers>=0.19.1, but you have tokenizers 0.13.3 which is incompatible.
+vllm 0.8.4 requires torch==2.6.0, but you have torch 2.8.0 which is incompatible.
+vllm 0.8.4 requires transformers>=4.51.1, but you have transformers 4.30.0 which is incompatible.
+xformers 0.0.29.post2 requires torch==2.6.0, but you have torch 2.8.0 which is incompatible.
+xgrammar 0.1.18 requires transformers>=4.38.0, but you have transformers 4.30.0 which is incompatible.
