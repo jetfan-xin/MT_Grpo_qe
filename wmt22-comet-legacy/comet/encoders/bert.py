@@ -163,7 +163,14 @@ class BERTEncoder(Encoder):
             - Subword mask of indices of starting subwords into the list of subwords. 
         """
         subwords, subword_masks, subword_lengths = self.subword_tokenize(tokens)
+        # print("[subwords]:", subwords)
+        # print("[subword_masks]:", subword_masks)
+        # print("[subword_lengths]:", subword_lengths)
+
         subword_ids, mask = self.convert_tokens_to_ids(subwords, subword_lengths)
+        # print("[subword_ids]:", subword_ids)
+        # print("[mask]:", mask)
+
         input_dict = {'input_ids': subword_ids, 'attention_mask':mask, 'subword_mask':subword_masks}
         return input_dict
 

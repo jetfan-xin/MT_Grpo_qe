@@ -6,7 +6,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0 
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -695,7 +695,7 @@ class RayPPOTrainer:
                 test_batch = test_batch.union(test_output_gen_batch)
 
                 # evaluate using reward_function
-                result = self.val_reward_fn(test_batch, return_dict=True)
+                result = self.val_reward_fn(test_batch, compute_val_reward=True, return_dict=True)
                 reward_tensor = result["reward_tensor"]
                 scores = reward_tensor.sum(-1).cpu().tolist()
                 sample_scores.extend(scores)

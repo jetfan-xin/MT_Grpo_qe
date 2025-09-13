@@ -45,7 +45,7 @@ export WANDB_DIR="$PWD/wandb_cache"
 # 数据路径
 comet_rm=False
 comet_free_rm=True 
-gpu_count=4
+gpu_count=4 
 
 ########## 1) 预处理数据 ##########
 train_file_path=../data/train/parquet/train_base_enzh_zhen.parquet
@@ -90,7 +90,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.free_cache_engine=False \
     algorithm.use_kl_in_reward=False \
     algorithm.kl_ctrl.kl_coef=0.0 \
-    custom_reward_function.path=comet_reward_batch.py \
+    custom_reward_function.path=comet_reward_batch_with_ray.py \
+    custom_reward_function.name=compute_score \
     reward_model.reward_manager=batch \
     trainer.val_before_train=False \
     trainer.logger=['wandb'] \
@@ -99,7 +100,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
-    trainer.test_freq=10 \
+    trainer.test_freq=2 \
     trainer.val_before_train=False \
     trainer.default_local_dir=./results/qwen2.5_0.5b_r1-zero \
     trainer.total_epochs=1 $@ 2>&1 | tee custom_grpo_fast_qe.log

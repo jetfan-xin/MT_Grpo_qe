@@ -308,11 +308,12 @@ class UniTEMetricMT(ReferencelessRegression):  ## jingfan进行比对
         """
         Function that prepares a sample to input the model.
         :param sample: list of dictionaries.
-        :param stage: either 'fit', 'validate', 'test', or 'predict'
+        :param stage: either 'fit', 'validate', 'test', or 'predict' 
         :returns: Tuple with 2 dictionaries (model inputs and targets).
             If `inference=True` returns only the model inputs.
         """
         sample = {k: [dic[k] for dic in sample] for k in sample[0]}
+        # sample: {'src': ['The output signal provides constant sync so the display never glitches.', 'Kroužek ilustrace je určen všem milovníkům umění ve věku od 10 do 15 let.', "Mandela then became South Africa's first black president after his African National Congress party won the 1994 election."], 'mt': ['Das Ausgangssignal bietet eine konstante Synchronisation, so dass die Anzeige nie stört.', 'Кільце ілюстрації призначене для всіх любителів мистецтва у віці від 10 до 15 років.', 'その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。']}
         if self.word_level_training:
             inputs = [self.encoder.prepare_sample_mt(sample["mt"])]
         else:

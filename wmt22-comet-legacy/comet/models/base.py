@@ -40,6 +40,9 @@ from .pooling_utils import average_pooling, max_pooling
 from .predict_pbar import PredictProgressBar
 from .utils import DataSampler, OrderedSampler, Prediction, Target
 
+from packaging import version as _plv
+from pytorch_lightning.callbacks import TQDMProgressBar
+
 if "COMET_EMBEDDINGS_CACHE" in os.environ:
     CACHE_SIZE = int(os.environ["COMET_EMBEDDINGS_CACHE"])
 else:
@@ -596,28 +599,77 @@ class CometModel(ptl.LightningModule, metaclass=abc.ABCMeta):
             message=".*Consider increasing the value of the `num_workers` argument` .*",
         )
         if gpus != 0:
-            accelerator = "cuda"
+            accelerator = "gpu"
         else:
             accelerator = "cpu"
 
-        if progress_bar:
+        _gpus = int(gpus) if isinstance(gpus, (int, float)) else 0
+        _use_gpu = _gpus > 0
+        _accelerator = "gpu" if _use_gpu else "cpu"
+        _devices = _gpus if _use_gpu else 1          # 关键：CPU 时 devices 至少为 1
+
+        # dataloader 的 workers 也别成 0
+        if num_workers is None:
+            num_workers = max(2, 2 * _gpus)
+        
+        # ---- 进度条与回调，按开关拼装 ----
+        _enable_pb = bool(progress_bar)
+        _callbacks = []
+        if _enable_pb:
+            # 你自己的 PredictProgressBar 如果是另一个进度条，也建议只保留一种以免重复
+            # 如果仍想保留，就两个都加；否则只保留 TQDMProgressBar
+            _callbacks = [TQDMProgressBar(refresh_rate=1)]  # , PredictProgressBar()]
+
+
+        # ---- 构建 Trainer （PL>=1.9/2.x）----
+        if _plv.parse(ptl.__version__) >= _plv.parse("1.9.0"):
             trainer = ptl.Trainer(
-                devices=gpus,
+                accelerator=_accelerator,
+                devices=_devices,
                 deterministic=True,
                 logger=False,
-                callbacks=[PredictProgressBar()],
-                accelerator=accelerator,
+                enable_progress_bar=_enable_pb,
+                callbacks=_callbacks,
                 max_epochs=-1,
             )
         else:
-            trainer = ptl.Trainer(
-                devices=gpus,
-                deterministic=True,
-                logger=False,
-                progress_bar_refresh_rate=0,
-                accelerator=accelerator,
-                max_epochs=-1,
-            )
+            # 老版本兜底（如果你的环境不是 2.x，就按旧逻辑）
+            if _enable_pb:
+                trainer = ptl.Trainer(
+                    accelerator=_accelerator,
+                    devices=_devices,
+                    deterministic=True,
+                    logger=False,
+                    callbacks=_callbacks,
+                    max_epochs=-1,
+                )
+            else:
+                trainer = ptl.Trainer(
+                    accelerator=_accelerator,
+                    devices=_devices,
+                    deterministic=True,
+                    logger=False,
+                    progress_bar_refresh_rate=0,
+                    max_epochs=-1,
+                )
+        # if progress_bar:
+        #     trainer = ptl.Trainer(
+        #         devices=gpus,
+        #         deterministic=True,
+        #         logger=False,
+        #         callbacks=[PredictProgressBar()],
+        #         accelerator=accelerator,
+        #         max_epochs=-1,
+        #     )
+        # else:
+        #     trainer = ptl.Trainer(
+        #         devices=gpus,
+        #         deterministic=True,
+        #         logger=False,
+        #         progress_bar_refresh_rate=0,
+        #         accelerator=accelerator,
+        #         max_epochs=-1,
+        #     )
 
         # TODO:
         # Remove this upon resolution of:

@@ -2,7 +2,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# You may obtain a copy of the License at 
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -21,7 +21,7 @@ from verl.workers.reward_manager import register
 
 
 @register("batch")
-class BatchRewardManager:
+class BatchRewardManager: 
     """
     A batch reward manager that computes rewards for a batch of data.
 
@@ -40,7 +40,7 @@ class BatchRewardManager:
         self.reward_fn_key = reward_fn_key
         self.reward_kwargs = reward_kwargs
 
-    def verify(self, data):
+    def verify(self, data, compute_val_reward=False):
         prompt_ids = data.batch["prompts"]
         response_ids = data.batch["responses"]
         attention_mask = data.batch["attention_mask"]
@@ -58,18 +58,18 @@ class BatchRewardManager:
         ground_truths = [item.non_tensor_batch["reward_model"].get("ground_truth", None) for item in data]
         data_sources = data.non_tensor_batch[self.reward_fn_key]
         extras = data.non_tensor_batch.get("extra_info", [None] * len(data))
-
         scores = self.compute_score(
             data_sources=data_sources,
             solution_strs=responses_str,
             ground_truths=ground_truths,
             extra_infos=extras,
+            compute_val_reward=compute_val_reward,
             **self.reward_kwargs,
         )
 
         return scores
 
-    def __call__(self, data: DataProto, return_dict=False):
+    def __call__(self, data: DataProto, compute_val_reward=False, return_dict=False):
         # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
         if "rm_scores" in data.batch.keys():
             if return_dict:
@@ -85,7 +85,7 @@ class BatchRewardManager:
         valid_response_lengths = attention_mask[:, prompt_len:].sum(dim=-1)
         data_sources = data.non_tensor_batch[self.reward_fn_key]
 
-        scores = self.verify(data)
+        scores = self.verify(data, compute_val_reward)
         rewards = []
         already_printed = {}
 
