@@ -10,6 +10,14 @@
 
 
 ## 修改步骤：
+### 2025.9.15
+#### 部署步骤：
+1. 把项目拉到本地 git clone https://github.com/jetfan-xin/MT_Grpo_qe.git
+2. 把chekpoints(https://huggingface.co/Unbabel/WMT24-QE-task2-baseline)保存到MT_Grpo_qe/ckpts/comet/路径下
+3. 按照MT_Grpo_qe/env_config/env_initialization.md配置环境
+4. 修改custom_grpo_qe.sh和comet_reward_batch_with_ray.py中的文件目录和wandb设置
+5. 运行custom_grpo_qe.sh
+
 
 ### 2025.9.6
 
