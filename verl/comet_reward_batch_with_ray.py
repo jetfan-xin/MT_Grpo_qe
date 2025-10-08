@@ -18,7 +18,7 @@ for name in logging.root.manager.loggerDict:
 # ---------- 配置项（可用环境变量覆盖） ----------
 _COMET_CKPT = os.getenv(
     "COMET_CKPT",
-    "/ltstorage/home/4xin/.cache/huggingface/hub/"
+    "/mnt/data1/users/4xin/hf/hub/"
     "models--Unbabel--wmt23-cometkiwi-da-xl/"
     "snapshots/33858b2239a139d497d9c74952c88b89a8c06213/"
     "checkpoints/model.ckpt",
@@ -35,9 +35,11 @@ WORD_QE_WEIGHT = float(os.getenv("WORD_QE_WEIGHT", "0.2"))  # add 模式下的�
 WORD_QE_SENT_MIN = float(os.getenv("WORD_QE_SENT_MIN", "0.0"))
 WORD_QE_SENT_MAX = float(os.getenv("WORD_QE_SENT_MAX", "1.0"))
 # legacy ckpt 路径（你已验证能加载）
+ckpt_path = " /mnt/data1/users/4xin/MT_Grpo_qe/ckpts"
+
 WORD_QE_CKPT = os.getenv(
     "WORD_QE_CKPT",
-    "/ltstorage/home/4xin/MT_Grpo_qe/ckpts/comet/WMT24-QE-task2-baseline/checkpoints/model.fixed.ckpt",
+    "/mnt/data1/users/4xin/MT_Grpo_qe/ckpts/comet/WMT24-QE-task2-baseline/checkpoints/model.fixed.ckpt",
 )
 
 ## =====导入legacy===== ##
@@ -87,13 +89,6 @@ def _get_word_qe_model():
     return _word_qe_model, _word_qe_device
 
 
-# # 词级（旧栈）：
-# try:
-#     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-#     word_model = load_ckpt_legacy("/ltstorage/home/4xin/MT_Grpo_qe/ckpts/comet/WMT24-QE-task2-baseline/checkpoints/model.fixed.ckpt").to(device).eval()
-#     print("成功加载QE checkpoint")
-# except:
-#     print("加载QE checkpoint失败")
 
 # =========================================================
 #                Ray Actor：独占 1 张 GPU

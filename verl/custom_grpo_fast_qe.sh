@@ -39,22 +39,27 @@ export WANDB_MODE=online
 # 可选：指定 wandb 的本地缓存目录
 export WANDB_DIR="$PWD/wandb_cache"
 
-
-# 数据路径
+## 超参数
 comet_rm=False
 comet_free_rm=True 
 gpu_count=4 
 
+# 数据路径
+data_path="/mnt/data1/users/4xin/MT_Grpo_qe/data"
+train_file_path="${data_path}/train/json"
+test_file_path="${data_path}/test/json"
+train_output_path="${data_path}/train/parquet/train_base_enzh_zhen.parquet"
+test_output_path="${data_path}/test/parquet/test_base_enzh_zhen.parquet"
+
+results_path="/mnt/data1/users/4xin/MT_Grpo_qe/results"
 ########## 1) 预处理数据 ##########
-train_file_path=../data/train/parquet/train_base_enzh_zhen.parquet
-test_file_path=../data/test/parquet/test_base_enzh_zhen.parquet
-python3 ../data/process_data.py \
-    --train_files "../data/train/json/train_zhen_6565.jsonl" "../data/train/json/train_enzh_6565.jsonl" \
-    --test_files "../data/test/json/wmt23_zhen.jsonl" "../data/test/json/wmt24_enzh.jsonl" \
+python3 /mnt/data1/users/4xin/MT_Grpo_qe/data/process_data.py \
+    --train_files "${train_file_path}/train_zhen_6565.jsonl" "${train_file_path}/train_enzh_6565.jsonl" \
+    --test_files "${test_file_path}/wmt23_zhen.jsonl" "${test_file_path}/wmt24_enzh.jsonl" \
     --tokenizer_path Qwen/Qwen2.5-3B \
     --template_type "base" \
-    --train_output_file ${train_file_path} \
-    --test_output_file ${test_file_path}
+    --train_output_file ${train_output_path} \
+    --test_output_file ${test_output_path}
 
 ########## 2) 训练超参 ##########
 
@@ -100,5 +105,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=40 \
     trainer.test_freq=10 \
     trainer.val_before_train=False \
-    trainer.default_local_dir=./results/qwen2.5_3b_r1-zero \
+    trainer.default_local_dir="${results_path}/qwen2.5_3b_r1-zero" \
     trainer.total_epochs=1 $@ 2>&1 | tee custom_grpo_fast_qe.log
