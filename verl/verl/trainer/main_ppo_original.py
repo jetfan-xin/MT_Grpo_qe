@@ -44,6 +44,7 @@ def run_ppo(config) -> None:
             # runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN", "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true"}},
             runtime_env=get_ppo_ray_runtime_env(), # here define the visible gpus to Ray = our defined CUDA_VISIBLE_DEVICES
             num_cpus=config.ray_init.num_cpus, # sets the total CPU capacity Ray believes this node has (a pool/limit for scheduling).
+            timeline_json_file="ray_timeline.json",
         )
 
     # Create a remote instance of the TaskRunner class, and
@@ -120,7 +121,6 @@ class TaskRunner:
             raise NotImplementedError
 
         from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
-        from verl.workers.reward_model.metric_worker import MetricRewardWorker  # 👈 新增
 
         # Map roles to their corresponding remote worker classes.
         role_worker_mapping = {
@@ -145,19 +145,15 @@ class TaskRunner:
         # - for code related prompt, we send to a sandbox if there are test cases
         # finally, we combine all the rewards together
         # The reward type depends on the tag of the data
-        # if config.reward_model.enable:
-        #     if config.reward_model.strategy in ["fsdp", "fsdp2"]:
-        #         from verl.workers.fsdp_workers import RewardModelWorker
-        #     elif config.reward_model.strategy == "megatron":
-        #         from verl.workers.megatron_workers import RewardModelWorker
-        #     else:
-        #         raise NotImplementedError
-        #     role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
-        #     mapping[Role.RewardModel] = global_pool_id
         if config.reward_model.enable:
-            # 用你的“通用指标 Worker”替换内置的 RewardModelWorker
-            role_worker_mapping[Role.RewardModel] = ray.remote(MetricRewardWorker)
-            mapping[Role.RewardModel] = global_pool_id   # 👈 进全局 GPU 池
+            if config.reward_model.strategy in ["fsdp", "fsdp2"]:
+                from verl.workers.fsdp_workers import RewardModelWorker
+            elif config.reward_model.strategy == "megatron":
+                from verl.workers.megatron_workers import RewardModelWorker
+            else:
+                raise NotImplementedError
+            role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+            mapping[Role.RewardModel] = global_pool_id
 
         # Add a reference policy worker if KL loss or KL reward is used.
         if config.algorithm.use_kl_in_reward or config.actor_rollout_ref.actor.use_kl_loss:
@@ -194,10 +190,6 @@ class TaskRunner:
         )
         # Initialize the workers of the trainer.
         trainer.init_workers()
-
-        if hasattr(reward_fn, "bind_rm_wg"): reward_fn.bind_rm_wg(trainer.rm_wg)
-        if hasattr(val_reward_fn, "bind_rm_wg"): val_reward_fn.bind_rm_wg(trainer.rm_wg)
-
         # Start the training process.
         trainer.fit()
 

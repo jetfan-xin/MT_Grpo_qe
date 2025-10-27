@@ -805,6 +805,12 @@ reward_model:
   # the reward manager can be set to prime for parallel verification.
   reward_manager: naive
 
+  reward_kwargs:
+    metrics:
+      comet:   {type: comet,  ckpt: /mnt/data1/users/4xin/hf/hub/models--Unbabel--wmt23-cometkiwi-da-xl/snapshots/33858b2239a139d497d9c74952c88b89a8c06213/checkpoints/model.ckpt, batch: 32, io: pair}
+      xcomet:  {type: comet,  ckpt: /mnt/data1/users/4xin/hf/hub/models--Unbabel--XCOMET-XL/snapshots/6a123c5e8e6dccab25e5fcffa3c8b417abadb462/checkpoints/model.ckpt,           batch: 32, io: triplet}
+      # bleu: {type: bleu, tokenize: zh}  # 想加就加
+
   # Whether to launch custom reward function asynchronously during log_prob
   launch_reward_fn_async: False
 

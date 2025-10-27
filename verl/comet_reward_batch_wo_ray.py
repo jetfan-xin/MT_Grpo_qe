@@ -1,24 +1,46 @@
-# my_comet_reward.py
+# COMET on a dedicated Ray GPU actor. 当所有GPU用于训练，在GRPO ADVANTAGE ESTIMATION - Starting computation时会卡住
+# TO-DO: OK BAD指标决定规则是什么？这影响指标设计
+
 import re, os
 import logging
-loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
-for logger in loggers:
-    logger.setLevel(logging.WARNING)
-from tqdm import tqdm
+from typing import List, Dict, Any, Optional
 import torch
-import ray
-from comet.models import load_from_checkpoint as load_ckpt_new # 用于load新栈（sequence-level, unified_metric）
+from tqdm import tqdm
+# ---------- Logging: 降低外部包日志噪音 ----------
+for name in logging.root.manager.loggerDict:
+    try:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    except Exception:
+        pass
 
+# ---------- 配置项（可用环境变量覆盖） ----------
 _COMET_CKPT = os.getenv(
     "COMET_CKPT",
-    "/ltstorage/home/4xin/.cache/huggingface/hub/"
+    "/mnt/data1/users/4xin/hf/hub/"
     "models--Unbabel--wmt23-cometkiwi-da-xl/"
     "snapshots/33858b2239a139d497d9c74952c88b89a8c06213/"
     "checkpoints/model.ckpt",
 )
+_COMET_ACTOR_NAME = os.getenv("COMET_ACTOR_NAME", "comet_actor")
+_COMET_BATCH = int(os.getenv("COMET_BATCH", "32"))  # 批量预测的 batch size
+_COMET_NAMESPACE = os.getenv("COMET_NAMESPACE", "verl_comet")
+_COMET_ACTOR = None  # 全局缓存
+# ===== Word-level QE (legacy) 开关与权重 =====
+WORD_QE_MODE = os.getenv("WORD_QE_MODE", "off").lower()   # off | only | add
+WORD_QE_WEIGHT = float(os.getenv("WORD_QE_WEIGHT", "0.2"))  # add 模式下的加权
+
+# 句分数归一化区间（按你实际模型的输出范围可调整）[?]
+WORD_QE_SENT_MIN = float(os.getenv("WORD_QE_SENT_MIN", "0.0"))
+WORD_QE_SENT_MAX = float(os.getenv("WORD_QE_SENT_MAX", "1.0"))
+# legacy ckpt 路径（你已验证能加载）
+ckpt_path = " /mnt/data1/users/4xin/MT_Grpo_qe/ckpts"
+
+WORD_QE_CKPT = os.getenv(
+    "WORD_QE_CKPT",
+    "/mnt/data1/users/4xin/MT_Grpo_qe/ckpts/comet/WMT24-QE-task2-baseline/checkpoints/model.fixed.ckpt",
+)
 
 ## =====导入legacy===== ##
-import importlib
 import importlib.util, sys
 def load_legacy_as(alias_name: str, legacy_root: str):
     pkg_init = os.path.join(legacy_root, "comet", "__init__.py")
@@ -34,250 +56,364 @@ def load_legacy_as(alias_name: str, legacy_root: str):
 LEGACY_ROOT = os.path.expanduser("~/MT_Grpo_qe/wmt22-comet-legacy")
 comet_legacy = load_legacy_as("comet_legacy", LEGACY_ROOT)
 
+# 新栈（sequence-level, unified_metric）
+from comet.models import load_from_checkpoint as load_ckpt_new  # 新栈（sequence-level, unified_metric） # 本地 ckpt，避免下载
 # 旧栈（word-level, unite_metric_multi_task）
+import importlib
 comet_legacy_models = importlib.import_module("comet_legacy.models")  # 关键！
 load_ckpt_legacy = getattr(comet_legacy_models, "load_from_checkpoint")
+# load_ckpt_legacy = comet_legacy.models.load_from_checkpoint
 
-# 词级（旧栈）：
-try:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    word_model = load_ckpt_legacy("/ltstorage/home/4xin/MT_Grpo_qe/ckpts/comet/WMT24-QE-task2-baseline/checkpoints/model.fixed.ckpt").to(device).eval()
-    print("成功加载QE checkpoint")
-except:
-    print("加载QE checkpoint失败")
+# ===== 惰性加载 word-level legacy 模型 =====
+_word_qe_model = None
+_word_qe_device = None
+
+def _get_word_qe_model():
+    """懒加载 legacy word-level 模型；根据可用性放到合适的 device。"""
+    global _word_qe_model, _word_qe_device, load_ckpt_legacy
+    if WORD_QE_MODE == "off":
+        return None, None
+    if _word_qe_model is not None:
+        return _word_qe_model, _word_qe_device
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        model = load_ckpt_legacy(WORD_QE_CKPT).to(dev).eval()
+        _word_qe_model, _word_qe_device = model, dev
+        print(f"[WORD-QE] legacy model loaded on {dev}")
+    except Exception as e:
+        print(f"[WORD-QE] load failed: {e}")
+        _word_qe_model, _word_qe_device = None, None
+    return _word_qe_model, _word_qe_device
 
 
+# ==================================================================
+#   懒加载 COMET 序列级模型；默认 device 由 COMET_DEVICE 控制（cpu|cuda）
+# ==================================================================
 # 全局变量缓存模型  
-_comet_model = None
+_COMET_MODEL = None
 
 def _load_comet_model():  
-    global _comet_model  
-    if _comet_model is None:  
-        print("Loading COMET model...")
+    global _COMET_MODEL
+    if _COMET_MODEL is not None:
+        return _COMET_MODEL
+    print("Loading COMET model...")
+
+    try:
+        # 尝试重新初始化 CUDA 环境
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+        torch.cuda.init()
+    except Exception as e:
+        print(f"CUDA initialization warning: {e}")
+    
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        gpu_count = torch.cuda.device_count()
+        current_device = torch.cuda.current_device()
+        gpu_memory = torch.cuda.get_device_properties(current_device).total_memory
+        print(f"Available GPUs: {gpu_count}, Current device: {current_device}, GPU memory: {gpu_memory / 1e9:.1f}GB")
         
-        # 在 Ray 多进程环境中重新初始化 CUDA 上下文
-        #在GPU不可用时不硬转 cuda
-        try:
-            # 尝试重新初始化 CUDA 环境
-            if hasattr(torch.cuda, 'empty_cache'):
-                torch.cuda.empty_cache()
-            torch.cuda.init()
-        except Exception as e:
-            print(f"CUDA initialization warning: {e}")
+        # Load COMET model with device specification
+        _COMET_MODEL = load_ckpt_new(_COMET_CKPT)
+        # Move to specific GPU if available
+        # Use a different GPU if multiple GPUs available to avoid conflict with vLLM
+        target_device = f"cuda:{(current_device + 1) % gpu_count}" if gpu_count > 1 else f"cuda:{current_device}"
+        _COMET_MODEL = _COMET_MODEL.to(target_device)
+        print(f"Loaded COMET model on {target_device}")
+    else:
+        print(f"CUDA is not available: {torch.cuda.is_available()}")
+        print("Loading COMET model on CPU (this will be slower)")
+        _COMET_MODEL = load_ckpt_new(_COMET_CKPT)
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"CUDA available: {torch.cuda.is_available()} | using device={device}")
-
-        if torch.cuda.is_available():
-            gpu_count = torch.cuda.device_count()
-            current_device = torch.cuda.current_device()
-            gpu_memory = torch.cuda.get_device_properties(current_device).total_memory
-            print(f"Available GPUs: {gpu_count}, Current device: {current_device}, GPU memory: {gpu_memory / 1e9:.1f}GB")
-            
-            
-            # Load COMET model with device specification
-            _comet_model = load_ckpt_new(_COMET_CKPT)
-            # Move to specific GPU if available
-            # Use a different GPU if multiple GPUs available to avoid conflict with vLLM
-            target_device = f"cuda:{(current_device + 1) % gpu_count}" if gpu_count > 1 else f"cuda:{current_device}"
-            _comet_model = _comet_model.to(target_device)
-            print(f"Loaded COMET model on {target_device}")
-        else:
-            print(f"CUDA is not available: {torch.cuda.is_available()}")
-            print("Loading COMET model on CPU (this will be slower)")
-            _comet_model = load_ckpt_new(_COMET_CKPT).to(device).eval()
-
-    return _comet_model  
+    return _COMET_MODEL  
 
 # =========================================================
-#                     原有的工具函数
+#                     工具函数
 # =========================================================
-def compute_bleu(lg_pair, ref, pred):  
+def compute_bleu(lg_pair: str, ref: str, pred: str) -> float:
     import sacrebleu
-    pred = pred if isinstance(pred, str) else ""  
-    tgt_lang = lg_pair.split("-")[1]  
-    tokenize = "zh" if tgt_lang == "zh" else "ja-mecab" if tgt_lang == "ja" else "13a"  
+    pred = pred if isinstance(pred, str) else ""
+    tgt_lang = lg_pair.split("-")[1]
+    tokenize = "zh" if tgt_lang == "zh" else "ja-mecab" if tgt_lang == "ja" else "13a"
     bleu = sacrebleu.sentence_bleu(pred, [ref], lowercase=True, tokenize=tokenize)
     return float(bleu.score)
 
-
-def extract_solution(solution_str: str) -> str:
-    """Extracts the final answer from the model's response string.
-    
-    Args:
-        solution_str: Raw response string from the language model
-        
-    Returns:
-        Tuple containing (extracted_answer, processed_string)
-    """
-    answer_pattern = r'<translate>(.*?)</translate>'
-    matches = list(re.finditer(answer_pattern, solution_str, re.DOTALL))
-    if not matches:
-        print("[Error] No valid answer tags found")
+def extract_solution(solution_str: str) -> Optional[str]:
+    pat = r"<translate>(.*?)</translate>"
+    m = list(re.finditer(pat, solution_str, re.DOTALL))
+    if not m:
+        # print("[Error] No valid <translate> tags found")
         return None
-    final_answer = matches[-1].group(1).strip()
-    return final_answer
+    return m[-1].group(1).strip()
 
-
-def validate_response_structure(processed_str: str) -> bool:
-    """Performs comprehensive validation of response structure.
-    
-    Args:
-        processed_str: Processed response string from the model
-        
-    Returns:
-        Boolean indicating whether all formatting requirements are met
-    """
-    # print("\n[Structure Validation]")
-    validation_passed = True
-
-    # Check required tags
+def validate_response_structure(s: str) -> bool:
+    # 必须有且仅有一次这四个标签，且顺序正确
     tags = {
-        'think_start': ('<think>', 1),
-        'think_end': ('</think>', 1),
-        'answer_start': ('<translate>', 1),
-        'answer_end': ('</translate>', 1)
+        "think_start": ("<think>", 1),
+        "think_end": ("</think>", 1),
+        "ans_start": ("<translate>", 1),
+        "ans_end": ("</translate>", 1),
     }
+    ok = True
+    pos = {}
+    for k, (t, exp) in tags.items():
+        c = s.count(t)
+        pos[k] = s.find(t)
+        if c != exp:
+            ok = False
+    if (pos["think_start"] > pos["think_end"]
+        or pos["think_end"] > pos["ans_start"]
+        or pos["ans_start"] > pos["ans_end"]):
+        ok = False
+    return ok
 
-    positions = {}
-    for tag_name, (tag_str, expected_count) in tags.items():
-        count = processed_str.count(tag_str)
-        positions[tag_name] = pos = processed_str.find(tag_str)
-        # print(f"  {tag_str}: count={count}, position={pos}")
-        if count != expected_count:
-            # print(f"  [Error] {tag_str} appears {count} times (expected {expected_count})")
-            validation_passed = False
-    # Verify tag order
-    if (positions['think_start'] > positions['think_end'] or
-        positions['think_end'] > positions['answer_start'] or
-        positions['answer_start'] > positions['answer_end']):
-        # print("  [Error] Incorrect tag order: Expected <think>...</think><answer>...</answer>")
-        validation_passed = False
-    # else:
-    #     print("  Tag sequence validation passed")
-    return validation_passed
+def _avg_token_reward_from_tags(tags):
+    """OK -> +1, BAD -> 0，其它（或缺失）按 OK 处理；返回句子平均分[-1,1]。"""
+    if not isinstance(tags, list) or len(tags) == 0:
+        return 0.0
+    s = 0
+    n = 0
+    for t in tags:
+        lab = str(t).upper() if t is not None else "OK"
+        s += 0.0 if lab == "BAD" else 1.0
+        n += 1
+    return s / max(1, n)
 
-# =========================================================
-#                          单条评分
-# =========================================================
-def compute_score_single(data_source, solution_str, ground_truth, extra_info=None):  
+def score_word_level(src: str, mt: str) -> dict:
     """
-    Single-item version of compute_score function for backward compatibility.
-    Used by NaiveRewardManager.
+    只用 tags 计算词级奖励：
+    return {
+      'avg_token_reward': float in [0,1],
+      'tags': List[str] or None
+    }
     """
-    lg_pair = extra_info.get("lg", "en-zh") if extra_info else "en-zh"  
-    src_text = extra_info.get("source", ground_truth) if extra_info else ground_truth  
-    
+    model, dev = _get_word_qe_model()
+    if model is None:
+        return {'avg_token_reward': 0.0, 'tags': None}
+
+    use_gpu_flag = 1 if (dev and dev.startswith("cuda") and torch.cuda.is_available()) else 0
+    data = [{"src": src, "mt": mt}]
+    out = model.predict(data, batch_size=1, gpus=use_gpu_flag, progress_bar=False)
+
+    # 统一抽取 tags
+    if isinstance(out, dict):
+        tags = out.get("tags", [None])[0]
+    else:
+        tags = getattr(out, "tags", [None])[0] if hasattr(out, "tags") else None
+
+    avg_token_reward = _avg_token_reward_from_tags(tags)
+    return {'avg_token_reward': float(avg_token_reward), 'tags': tags}
+# =========================================================
+#                   单条评分（Naive / DAPO 单样本）
+# =========================================================
+def compute_score_single(
+    data_source: str,
+    solution_str: str,
+    ground_truth: str,
+    extra_info: Optional[Dict[str, Any]] = None,
+    compute_val_reward: bool = False,
+) -> float:
+    lg_pair = extra_info.get("lg", "en-zh") if extra_info else "en-zh"
+    src_text = extra_info.get("source", ground_truth) if extra_info else ground_truth
+
     format_score = validate_response_structure(solution_str)
-    
-    if not format_score:  
+    if not format_score:
         print("invalid format")
-        return -3.0  # 格式错误惩罚，与batch版本保持一致  
-    
-    answer_text = extract_solution(solution_str)
-    if answer_text is  None:
-        print("format score is 1.0 but no <translate> tag found in completion: ", solution_str)
+        if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+            return{
+                "score": -3.0,
+                "format_score": -3.0,
+                "bleu_score": float("nan"),
+                "comet_score": float("nan")
+            }
         return -3.0
 
-    bleu_score = compute_bleu(lg_pair, ground_truth, answer_text)  
-    
-    model = _load_comet_model()  
-    comet_data = [{"src": src_text, "mt": answer_text}]  
-    gpus_flag = 1 if torch.cuda.is_available() else 0 # <- 修复：控制是否分配gpu
-    comet_scores = model.predict(comet_data, batch_size=8, gpus=gpus_flag, progress_bar=False).scores  
-    comet_score = float(comet_scores[0])  # 直接用原始分数
-    final_score = format_score + (bleu_score / 100.0) + comet_score  # BLEU缩放，COMET不缩放
-    print("final score: ", final_score)
-    return final_score
+    ans = extract_solution(solution_str)
+    if ans is None:
+        print("format score is 1.0 but no <translate> tag found in completion")
+        if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+            return{
+                "score": -3.0,
+                "format_score": -3.0,
+                "bleu_score": float("nan"),
+                "comet_score": float("nan")
+            }
+        return -3.0
+
+    if WORD_QE_MODE in ["off", "add"] or compute_val_reward:
+        bleu_score = compute_bleu(lg_pair, ground_truth, ans)
+        comet_data = [{"src": src_text, "mt": ans}]
+        model = _load_comet_model()
+        comet_scores = model.predict(comet_data, batch_size=8, gpus=1, progress_bar=False).scores
+        comet_score = float(comet_scores[0])  # 直接用原始分数
+        final_score = float(format_score) + (bleu_score / 100.0) + comet_score
+        if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+            print(f"Validation final score={final_score:.4f} ")
+            return{
+                "score": float(final_score),
+                "format_score": float(format_score),
+                "bleu_score": bleu_score / 100.0,
+                "comet_score": comet_score
+            }
+        if WORD_QE_MODE == "add":
+            qe_avg = None
+            qe = score_word_level(src_text, ans)
+            qe_avg = qe['avg_token_reward']  # [-1, 1]
+            final_score = final_score + WORD_QE_WEIGHT * (qe_avg if qe_avg is not None else 0.0)
+    else: # if WORD_QE_MODE == "only":
+        qe_avg = None
+        qe = score_word_level(src_text, ans)
+        qe_avg = qe['avg_token_reward']  # [-1, 1]
+        qe_score = qe_avg if qe_avg is not None else 0.0
+        final_score = format_score + (qe_avg if qe_avg is not None else 0.0)
+    print("final score:", final_score)
+    return float(final_score)
 
 # =========================================================
 #                   批量评分（BatchRewardManager）
 # =========================================================
-def compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos=None, micro_batch_size=8):
-    """
-    Batch version of compute_score function.
-    Migrated and optimized from MT-R1-Zero DataParallelCOMET.compute_comet_rm
-    
-    Args:
-        data_sources: List of data sources
-        solution_strs: List of solution strings
-        ground_truths: List of ground truth strings
-        extra_infos: List of extra info dicts (optional)
-        micro_batch_size: Size of micro batches for COMET processing
-        
-    Returns:
-        List of final scores
-    """
+def compute_score_batch(
+    data_sources: List[str],
+    solution_strs: List[str],
+    ground_truths: List[str],
+    extra_infos: Optional[List[Optional[Dict[str, Any]]]] = None,
+    compute_val_reward: bool = False, 
+    micro_batch_size: int = 8,  # 未使用（一次性送 actor，actor 内部再 batch）
+) -> List[float]:
     if extra_infos is None:
         extra_infos = [None] * len(solution_strs)
-    
-    triplet_list = []
-    final_scores = []
-    
-    print(f"Processing batch of {len(solution_strs)} items...")
-    print("data_sources", len(data_sources), "solution_strs", len(solution_strs),
-          "ground_truths", len(ground_truths), "extra_infos", len(extra_infos))
 
-    model = _load_comet_model()
-    
-    invalid_items=[]
+    triplet_list = []
+    final_scores: List[float] = []
+    invalid_items: List[int] = []
+
+    print(f"Processing batch of {len(solution_strs)} items...")
+    print("data_sources", len(data_sources),
+          "solution_strs", len(solution_strs),
+          "ground_truths", len(ground_truths),
+          "extra_infos", len(extra_infos))
+
+    model = None
+    if not (WORD_QE_MODE=="only" and compute_val_reward==0):
+        model = _load_comet_model()
+        
     for i in tqdm(range(len(solution_strs)), desc="checking format and building triplets"):
-        data_source = data_sources[i]
-        solution_str = solution_strs[i]
-        ground_truth = ground_truths[i]
-        extra_info = extra_infos[i]
-        
-        lg_pair = extra_info.get("lg", "en-zh") if extra_info else "en-zh"
-        src_text = extra_info.get("source", ground_truth) if extra_info else ground_truth
-        
-        format_score = validate_response_structure(solution_str)
-        if not format_score:
+        sol = solution_strs[i]
+        gt = ground_truths[i]
+        info = extra_infos[i]
+        lg_pair = info.get("lg", "en-zh") if info else "en-zh"
+        src_text = info.get("source", gt) if info else gt
+        ans = extract_solution(sol)
+
+        if not validate_response_structure(sol):
             invalid_items.append(i)
-            final_scores.append(-3.0)
+            if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+                final_scores.append({
+                    "score": -3.0,
+                    "format_score": -3.0,
+                    "bleu_score": float("nan"),
+                    "comet_score": float("nan")
+                })
+            else:
+                final_scores.append(-3.0)
             continue
         
-        answer_text = extract_solution(solution_str)
-        if answer_text is None:
+        if ans is None:
             invalid_items.append(i)
-            final_scores.append(-3.0)
+            if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+                final_scores.append({
+                    "score": -3.0,
+                    "format_score": -3.0,
+                    "bleu_score": float("nan"),
+                    "comet_score": float("nan")
+                })
+            else:
+                final_scores.append(-3.0)
             continue
-        
-        bleu_score = compute_bleu(lg_pair, ground_truth, answer_text)
-        
-        triplet_item = {"src": src_text, "mt": answer_text}
-        triplet_list.append({
-            "triplet": triplet_item,
-            "format_score": format_score,
-            "bleu_score": bleu_score,
-            "index": i
-        })
+
+        if WORD_QE_MODE in ["off", "add"] or compute_val_reward:
+            bleu = compute_bleu(lg_pair, gt, ans)
+            triplet_list.append({
+                "triplet": {"src": src_text, "mt": ans},
+                "format_score": True,
+                "bleu_score": bleu,
+                "index": i,
+            })
+        else: # WORD_QE_MODE == "only":
+            triplet_list.append({
+                "triplet": {"src": src_text, "mt": ans},
+                "index": i,
+            })
     print(f"invalid items number {len(invalid_items)} / {len(solution_strs)}")
     
     if triplet_list:
-        comet_triplets = [item["triplet"] for item in triplet_list]
+        comet_triplets = [x["triplet"] for x in triplet_list]
         print("Processing comet triplets", len(comet_triplets), comet_triplets[:2])
-
-        comet_scores_flat = []
-
-        # 直接用原始分数
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = load_ckpt_new(_COMET_CKPT).to(device)
-        gpus_flag = 1 if torch.cuda.is_available() else 0 # <- 修复：控制是否分配gpu
-        scores = model.predict(comet_triplets, batch_size=32, gpus=gpus_flag, progress_bar=False)
-        comet_scores_flat.extend([float(score) for score in scores.scores])
-
+        
+        fmt = 1.0  # 上面已验证结构
+        comet_scores = []
+        if WORD_QE_MODE in ["off", "add"] or compute_val_reward:
+            # 直接用原始分数
+            scores = model.predict(comet_triplets, batch_size=_COMET_BATCH, gpus=1)
+            comet_scores.extend([float(score) for score in scores.scores])
+        
         for i, item in enumerate(triplet_list):
-            original_index = item["index"]
-            format_score = item["format_score"]
-            bleu_score = item["bleu_score"]
-            comet_score = comet_scores_flat[i]  # 不再/100.0
-            final_score = format_score + (bleu_score / 100.0) + comet_score
-            while len(final_scores) <= original_index:
-                final_scores.append(0.0)
-            final_scores[original_index] = final_score
-            print(f"Item {original_index}: final_score={final_score} (format={format_score}, bleu={bleu_score}, comet={comet_score})")
+            j = item["index"]
+            while len(final_scores) <= j:
+                if compute_val_reward:
+                    final_scores.append({
+                        "score": 0.0,
+                        "format_score": 0.0,
+                        "bleu_score": 0.0,
+                        "comet_score": 0.0
+                    })
+                else:
+                    final_scores.append(0.0)
+
+            if WORD_QE_MODE in ["off", "add"] or compute_val_reward:
+                bleu = item["bleu_score"]
+                comet = comet_scores[i]
+                seq_reward = float(fmt) + (bleu / 100.0) + comet
+                if compute_val_reward:
+                    final_scores[j]["score"] = seq_reward
+                    final_scores[j]["format_score"] = float(fmt)
+                    final_scores[j]["bleu_score"] = bleu / 100.0
+                    final_scores[j]["comet_score"] = comet
+                    print(f"Item {j}: Validation final={seq_reward:.4f} "
+                        f"format_score={float(fmt)}, bleu_score={bleu / 100.0}, comet_score={comet}")
+                    continue
+
+            if WORD_QE_MODE == "off":
+                score = seq_reward
+                print(f"Item {j}: final={score:.4f} "
+                    f"(seq: format=1.0, bleu={bleu:.2f}, comet={comet:.4f}")
+            else: # WORD_QE_MODE in ["add", "only"]":
+                qe_avg = None
+                qe = score_word_level(item["triplet"]["src"], item["triplet"]["mt"])
+                qe_avg = qe['avg_token_reward']  # [-1, 1]
+                if WORD_QE_MODE == "add":
+                    score = seq_reward + WORD_QE_WEIGHT * (qe_avg if qe_avg is not None else 0.0)
+                    print(f"Item {j}: final={score:.4f} "
+                        f"(seq: format=1.0, bleu={bleu:.2f}, comet={comet:.4f}; "
+                        f"wordQE_mode={WORD_QE_MODE}, wordQE_avg={qe_avg})")
+                else: # WORD_QE_MODE == "only":
+                    score = float(fmt) + (qe_avg if qe_avg is not None else 0.0)
+                    print(f"Item {j}: final={score:.4f} "
+                        f"wordQE_mode={WORD_QE_MODE}, wordQE_avg={qe_avg})")
+            final_scores[j] = float(score)
+
+    # 补齐长度（极端情况下）
     while len(final_scores) < len(solution_strs):
-        final_scores.append(-3.0)
+        if compute_val_reward: # 验证时，保留原本衡量模型效果的标准指标
+            final_scores.append({
+                "score": -3.0,
+                "format_score": -3.0,
+                "bleu_score": float("nan"),
+                "comet_score": float("nan")
+            })
+        else:
+            final_scores.append(-3.0)
     print(f"Batch processing completed: {len(final_scores)} scores computed")
     return final_scores
 
@@ -286,47 +422,38 @@ def compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos=
 # =========================================================
 def compute_score(*args, **kwargs):
     """
-    Adaptive compute_score function that supports both single and batch processing.
-    
-    For single processing (NaiveRewardManager):
-        compute_score(data_source, solution_str, ground_truth, extra_info=None)
-        
-    For batch processing (BatchRewardManager):
-        compute_score(data_sources=[], solution_strs=[], ground_truths=[], extra_infos=None, ...)
+    兼容三种调用：
+    1) 批量（BatchRewardManager 风格）：
+       compute_score(data_sources=[], solution_strs=[], ground_truths=[], extra_infos=None, ...)
+    2) 单条（位置参数）：
+       compute_score(data_source, solution_str, ground_truth, extra_info=None)
+    3) 单条（关键字参数，DAPO 风格）：
+       compute_score(data_source=..., solution_str=..., ground_truth=..., extra_info=None)
     """
-    # Check if this is a batch call (BatchRewardManager style)
+    # 批量
     if 'data_sources' in kwargs or 'solution_strs' in kwargs or 'ground_truths' in kwargs:
-        # Batch processing call
-        data_sources = kwargs.get('data_sources', [])
-        solution_strs = kwargs.get('solution_strs', [])
-        ground_truths = kwargs.get('ground_truths', [])
-        extra_infos = kwargs.get('extra_infos', None)
-        micro_batch_size = kwargs.get('micro_batch_size', 8)
-        
-        print(f"Using BATCH processing for {len(solution_strs)} items")
-        return compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos, micro_batch_size)
-    
-    # Check if this is positional arguments (single processing)
-    elif len(args) >= 3:
-        # Single processing call
-        print("Using SINGLE processing for 1 item")
-        data_source = args[0]
-        solution_str = args[1] 
-        ground_truth = args[2]
-        extra_info = args[3] if len(args) > 3 else kwargs.get('extra_info', None)
-        
-        return compute_score_single(data_source, solution_str, ground_truth, extra_info)
-    
-    # Check if this is single item with keyword arguments (DAPO style)
-    elif 'data_source' in kwargs and 'solution_str' in kwargs and 'ground_truth' in kwargs:
-        # Single item with keyword arguments
-        print("Using SINGLE processing for 1 item (keyword args)")
-        data_source = kwargs['data_source']
-        solution_str = kwargs['solution_str']
-        ground_truth = kwargs['ground_truth']
-        extra_info = kwargs.get('extra_info', None)
-        
-        return compute_score_single(data_source, solution_str, ground_truth, extra_info)
-    
-    else:
-        raise ValueError(f"Invalid arguments for compute_score: args={args}, kwargs={kwargs}")
+        return compute_score_batch(
+            kwargs.get('data_sources', []),
+            kwargs.get('solution_strs', []),
+            kwargs.get('ground_truths', []),
+            kwargs.get('extra_infos', None),
+            kwargs.get('compute_val_reward', False),
+            kwargs.get('micro_batch_size', 8),
+        )
+    # 单条（位置参数）
+    if len(args) >= 3:
+        return compute_score_single(
+            args[0], args[1], args[2],
+            args[3] if len(args) > 3 else kwargs.get('extra_info', None),
+            args[4] if len(args) > 4 else kwargs.get('compute_val_reward', False)
+        )
+    # 单条（关键字参数）
+    if {'data_source', 'solution_str', 'ground_truth'} <= set(kwargs.keys()):
+        return compute_score_single(
+            kwargs['data_source'], 
+            kwargs['solution_str'], 
+            kwargs['ground_truth'], 
+            kwargs.get('extra_info', None),
+            kwargs.get('compute_val_reward', False)
+        )
+    raise ValueError(f"Invalid arguments for compute_score: args={args}, kwargs={kwargs}")

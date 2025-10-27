@@ -695,24 +695,151 @@ class RayPPOTrainer:
                 test_batch = test_batch.union(test_output_gen_batch)
 
                 # evaluate using reward_function
-                result = self.val_reward_fn(test_batch, compute_val_reward=True, return_dict=True)
-                reward_tensor = result["reward_tensor"]
+                # result = self.val_reward_fn(test_batch, compute_val_reward=True, return_dict=True)
+                # reward_tensor = result["reward_tensor"]
+                # scores = reward_tensor.sum(-1).cpu().tolist()
+                # sample_scores.extend(scores)
+
+                # reward_extra_infos_dict["reward"].extend(scores)
+                # print(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
+                # if "reward_extra_info" in result:
+                #     for key, lst in result["reward_extra_info"].items():
+                #         reward_extra_infos_dict[key].extend(lst)
+                #         print(f"len reward_extra_infos_dict['{key}']: {len(reward_extra_infos_dict[key])}")
+
+                # data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
+                # pbar.update(1)  
+                # pbar.set_postfix({  
+                #     'samples': len(sample_scores),  
+                #     'current_batch_size': len(test_batch)  
+                # })  
+
+                # evaluate using reward_function
+
+
+                # ====== Store generated outputs ======
+                output_ids = test_output_gen_batch.batch["responses"]
+                output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+                sample_outputs.extend(output_texts)
+
+                test_batch = test_batch.union(test_output_gen_batch)
+
+                # ====== Evaluate using reward_function (兼容多种返回类型) ======
+                res = self.val_reward_fn(test_batch, compute_val_reward=True, return_dict=True)
+
+                # 统一规范化：得到 result_list (list[dict]) 和 reward_tensor ([N,1])
+                import torch
+                from pathlib import Path
+
+                result_list = None
+                reward_tensor = None
+
+                if isinstance(res, dict) and "reward_tensor" in res:
+                    # 旧逻辑：返回 dict，内含 reward_tensor 与可选 reward_extra_info
+                    reward_tensor = res["reward_tensor"]  # [N, ...]
+                    if reward_tensor.dim() == 1:
+                        reward_tensor = reward_tensor.unsqueeze(1)
+                    # 如果有 reward_extra_info，先转为 list[dict]
+                    if "reward_extra_info" in res and isinstance(res["reward_extra_info"], dict):
+                        # 把 dict[list] 转成 list[dict]
+                        keys = list(res["reward_extra_info"].keys())
+                        vals = res["reward_extra_info"]
+                        n = len(next(iter(vals.values()))) if vals else reward_tensor.shape[0]
+                        result_list = []
+                        for i in range(n):
+                            d = {k: vals[k][i] for k in keys}
+                            # 若没有总分，就用 sum(-1)
+                            d.setdefault("score", float(reward_tensor[i].sum().item()))
+                            result_list.append(d)
+                    else:
+                        # 只有 reward_tensor，就做一个最小结果
+                        scores = reward_tensor.sum(-1).cpu().tolist()
+                        result_list = [{"score": float(s)} for s in scores]
+
+                elif isinstance(res, torch.Tensor):
+                    # 直接返回 Tensor
+                    reward_tensor = res
+                    if reward_tensor.dim() == 1:
+                        reward_tensor = reward_tensor.unsqueeze(1)
+                    scores = reward_tensor.sum(-1).cpu().tolist()
+                    result_list = [{"score": float(s)} for s in scores]
+
+                elif isinstance(res, list):
+                    # 期望是 list[dict]
+                    assert all(isinstance(x, dict) for x in res), f"res is list but not of dicts: {type(res[:1])}"
+                    result_list = res
+                    # 构造 reward_tensor（优先用 item["score"]；没有就视作 NaN）
+                    scores = [float(x.get("score", float("nan"))) for x in result_list]
+                    reward_tensor = torch.tensor(scores, dtype=torch.float32).unsqueeze(1)
+
+                else:
+                    raise TypeError(f"Unsupported val_reward_fn return type: {type(res)}")
+
+                # ====== 收集分数与额外指标（供后续统计）======
                 scores = reward_tensor.sum(-1).cpu().tolist()
                 sample_scores.extend(scores)
 
-                reward_extra_infos_dict["reward"].extend(scores)
-                print(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
-                if "reward_extra_info" in result:
-                    for key, lst in result["reward_extra_info"].items():
-                        reward_extra_infos_dict[key].extend(lst)
-                        print(f"len reward_extra_infos_dict['{key}']: {len(reward_extra_infos_dict[key])}")
+                # 把所有键展开到 reward_extra_infos_dict，确保每个 key 的长度与样本数一致
+                for item in result_list:
+                    for k, v in item.items():
+                        # 统一把张量转标量/列表
+                        if hasattr(v, "item"):
+                            v = v.item()
+                    # nothing else; we’ll append below
 
-                data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
-                pbar.update(1)  
-                pbar.set_postfix({  
-                    'samples': len(sample_scores),  
-                    'current_batch_size': len(test_batch)  
-                })  
+                # 初始化/追加
+                for item in result_list:
+                    for k, v in item.items():
+                        reward_extra_infos_dict[k].append(v)
+
+                # 兼容旧字段名 "reward"
+                reward_extra_infos_dict["reward"].extend(scores)
+
+                print(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
+
+                # ====== 记录数据来源（与样本对齐）======
+                n_cur = reward_tensor.shape[0]
+                data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * n_cur))
+
+                # ====== 进度条 ======
+                pbar.update(1)
+                pbar.set_postfix({
+                    'samples': len(sample_scores),
+                    'current_batch_size': len(test_batch)
+                })
+
+                # ====== 组装记录 -> 用于 W&B 表格 + 本地 JSONL ======
+                # 注意：sample_inputs 是你函数上面已经累计的 list
+                records = []
+                base_len = len(sample_outputs)
+                # 对齐当前这一个 batch 的记录范围
+                start_idx = base_len - n_cur
+                end_idx = base_len
+
+                for i in range(n_cur):
+                    rec = {
+                        "prompt": sample_inputs[start_idx + i] if start_idx + i < len(sample_inputs) else None,
+                        "output": sample_outputs[start_idx + i] if start_idx + i < len(sample_outputs) else None,
+                    }
+                    # 合并各项指标
+                    rec.update(result_list[i])
+                    records.append(rec)
+
+                # ====== W&B 表格：默认上传前 200 条，避免 Dashboard 过大 ======
+                if "wandb" in [b.lower() for b in self.config.trainer.logger]:
+                    try:
+                        import wandb
+                        cols = list(records[0].keys()) if records else ["prompt", "output", "score"]
+                        table = wandb.Table(columns=cols)
+                        max_rows = 200  # 你也可以改大/改小
+                        for rec in records[:max_rows]:
+                            table.add_data(*[rec.get(c, "") for c in cols])
+                        # 用 global_steps 做 key，避免覆盖
+                        wandb.log({f"val/samples_step_{self.global_steps}": table}, step=self.global_steps)
+                        print(f"[VAL] ✅ Logged {min(len(records), max_rows)} rows to W&B table")
+                    except Exception as e:
+                        print(f"[VAL] ⚠️ W&B table log failed: {e}")
+                # ====== 结束 ======
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 

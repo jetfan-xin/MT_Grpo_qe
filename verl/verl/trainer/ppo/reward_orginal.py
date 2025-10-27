@@ -34,16 +34,13 @@ def get_custom_reward_fn(config):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Reward function file '{file_path}' not found.")
 
-    ### --- PATCH A: use a stable module name ---
-    module_name = "verl_custom_reward"  # use fixed name instead of "custom_module"
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    spec = importlib.util.spec_from_file_location("custom_module", file_path)
     module = importlib.util.module_from_spec(spec)
     try:
-        sys.modules[module_name] = module
+        sys.modules["custom_module"] = module
         spec.loader.exec_module(module)
     except Exception as e:
         raise RuntimeError(f"Error loading module from '{file_path}': {e}") from e
-    ### --- END PATCH A ---
 
     function_name = reward_fn_config.get("name")
     if not hasattr(module, function_name):
@@ -57,19 +54,7 @@ def get_custom_reward_fn(config):
     def wrapped_fn(*args, **kwargs):
         return raw_fn(*args, **kwargs, **reward_kwargs)
 
-    ### --- PATCH B: expose binder so main_ppo can call it ---
-    def _binder(rm_wg):
-        if hasattr(module, "bind_rm_wg"):
-            module.bind_rm_wg(rm_wg)
-            print("[Reward][bind] rm_wg bound to module:", module_name)
-        else:
-            print("[Reward][bind] warning: custom module has no bind_rm_wg()")
-
-    wrapped_fn.bind_rm_wg = _binder
-    ### --- END PATCH B ---
-
     return wrapped_fn
-
 
 
 def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
@@ -115,7 +100,7 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
             final_compute_score = default_compute_score
 
     # Instantiate and return the reward manager with the specified parameters
-    manager = reward_manager_cls(
+    return reward_manager_cls(
         tokenizer=tokenizer,
         num_examine=num_examine,
         compute_score=final_compute_score,
@@ -123,15 +108,6 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
         **reward_kwargs,
     )
 
-    ### --- PATCH C: forward binder to manager ---
-    # main_ppo.py 里有：
-    #   if hasattr(reward_fn, "bind_rm_wg"): reward_fn.bind_rm_wg(trainer.rm_wg)
-    # 这里把 compute_score 的 binder 暴露到 manager 上，保证绑定发生在“同一个模块实例”
-    if hasattr(final_compute_score, "bind_rm_wg"):
-        manager.bind_rm_wg = final_compute_score.bind_rm_wg
-    ### --- END PATCH C ---
-
-    return manager
 
 def compute_reward(data: DataProto, reward_fn):
     """

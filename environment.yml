@@ -1,23 +1,6 @@
-name: pjh_grpo_mt 
+name: xjf_verl_qe
 channels:
-  - defaults
   - conda-forge
 dependencies:
-  - python=3.10    
+  - python=3.10
   - pip
-  - pip:
-      - torch
-      - torchvision
-      - transformers>=4.51
-      - ms-swift
-      - peft==0.15.2
-      - trl==0.17
-      - deepspeed==0.16.5
-      - vllm==0.9
-      - bitsandbytes>=0.45.5
-      - accelerate==1.6.0
-      - opencv-python
-      - wandb
-      - timm
-      - sacrebleu
-      - unbabel-comet

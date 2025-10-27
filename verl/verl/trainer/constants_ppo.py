@@ -1,4 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Copyright 2024 Bytedance Ltd. and/or its affiliates 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,6 @@ def get_ppo_ray_runtime_env():
     runtime_env = {"env_vars": PPO_RAY_RUNTIME_ENV["env_vars"].copy()}
     for key in list(runtime_env["env_vars"].keys()):
         # Always preserve CUDA_VISIBLE_DEVICES to ensure GPU access in Ray workers
-        if key != "CUDA_VISIBLE_DEVICES" and os.environ.get(key) is not None:
+        if key != "CUDA_VISIBLE_DEVICES" and os.environ.get(key) is not None: # can define other environment config by yourself
             runtime_env["env_vars"].pop(key, None)
     return runtime_env

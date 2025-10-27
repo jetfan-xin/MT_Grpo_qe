@@ -99,6 +99,7 @@ class CometActor:
         cvd = os.getenv("CUDA_VISIBLE_DEVICES")
         print(f"[COMET-Actor] CVD={cvd}  cuda.is_available={torch.cuda.is_available()}  count={torch.cuda.device_count()}")
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        print("self.device:", self.device)
         # 序列级（新栈）
         self.model = load_ckpt_new(ckpt_path).to(self.device)
         self.model.eval()
