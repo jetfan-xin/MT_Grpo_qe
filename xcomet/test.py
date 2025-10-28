@@ -1,24 +1,24 @@
-# from comet import download_model, load_from_checkpoint
 from comet import download_model, load_from_checkpoint
+# from comet import download_model, load_from_checkpoint
 
-model_path = download_model("Unbabel/XCOMET-XL")
-model = load_from_checkpoint(model_path)
-data = [
-    {
-        "src": "Boris Johnson teeters on edge of favour with Tory MPs", 
-        "mt": "Boris Johnson ist bei Tory-Abgeordneten völlig in der Gunst", 
-        "ref": "Boris Johnsons Beliebtheit bei Tory-MPs steht auf der Kippe"
-    }
-]
-model_output = model.predict(data, batch_size=8, gpus=1)
-# Segment-level scores
-print (model_output.scores)
+# model_path = download_model("Unbabel/XCOMET-XL")
+# model = load_from_checkpoint(model_path)
+# data = [
+#     {
+#         "src": "Boris Johnson teeters on edge of favour with Tory MPs", 
+#         "mt": "Boris Johnson ist bei Tory-Abgeordneten völlig in der Gunst", 
+#         "ref": "Boris Johnsons Beliebtheit bei Tory-MPs steht auf der Kippe"
+#     }
+# ]
+# model_output = model.predict(data, batch_size=8, gpus=1)
+# # Segment-level scores
+# print (model_output.scores)
 
-# System-level score
-print (model_output.system_score)
+# # System-level score
+# print (model_output.system_score)
 
-# Score explanation (error spans)
-print (model_output.metadata.error_spans)
+# # Score explanation (error spans)
+# print (model_output.metadata.error_spans)
 
 # model_path = "/mnt/data1/users/4xin/hf/hub/models--Unbabel--XCOMET-XXL/snapshots/873bac1b1c461e410c4a6e379f6790d3d1c7c214/checkpoints/model.ckpt"
 # model_path = download_model("Unbabel/XCOMET-XL")
@@ -81,35 +81,33 @@ print (model_output.metadata.error_spans)
 # ]
 # '''
 
-# import os
-# from comet import download_model, load_from_checkpoint
-# model_path = os.getenv(
-#     "COMET_CKPT",
-#     "/mnt/data1/users/4xin/hf/hub/"
-#     "models--Unbabel--wmt23-cometkiwi-da-xl/"
-#     "snapshots/33858b2239a139d497d9c74952c88b89a8c06213/"
-#     "checkpoints/model.ckpt",
-# )
-# model = load_from_checkpoint(model_path)
-# data = [
-#     {
-#         "src": "The output signal provides constant sync so the display never glitches.",
-#         "mt": "Das Ausgangssignal bietet eine konstante Synchronisation, so dass die Anzeige nie stört.",
-#         "ref": "nihao niahao nihao."
-#     },
-#     {
-#         "src": "The output signal provides constant sync so the display never glitches.",
-#         "mt": "Das Ausgangssignal bietet eine konstante Synchronisation, so dass die Anzeige nie stört."
-#     },
-#     {
-#         "src": "Kroužek ilustrace je určen všem milovníkům umění ve věku od 10 do 15 let.",
-#         "mt": "Кільце ілюстрації призначене для всіх любителів мистецтва у віці від 10 до 15 років."
-#     },
-#     {
-#         "src": "Mandela then became South Africa's first black president after his African National Congress party won the 1994 election.",
-#         "mt": "その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。",
-#         "ref": "nihao niahao nihao."
-#     }
-# ]
-# model_output = model.predict(data, batch_size=8, gpus=1)
-# print (model_output)
+import os
+from comet import download_model, load_from_checkpoint
+model_path = os.getenv(
+    "COMET_CKPT",
+    "/mnt/data1/users/4xin/hf/hub/"
+    "models--Unbabel--wmt23-cometkiwi-da-xl/"
+    "snapshots/33858b2239a139d497d9c74952c88b89a8c06213/"
+    "checkpoints/model.ckpt",
+)
+model = load_from_checkpoint(model_path)
+data = [
+    {
+        "src": "The output signal provides constant sync so the display never glitches.",
+        "mt": "Das Ausgangssignal bietet eine konstante Synchronisation, so dass die Anzeige nie stört."
+    },
+    {
+        "src": "The output signal provides constant sync so the display never glitches.",
+        "mt": "Das Ausgangssignal bietet eine konstante Synchronisation, so dass die Anzeige nie stört."
+    },
+    {
+        "src": "Kroužek ilustrace je určen všem milovníkům umění ve věku od 10 do 15 let.",
+        "mt": "Кільце ілюстрації призначене для всіх любителів мистецтва у віці від 10 до 15 років."
+    },
+    {
+        "src": "Mandela then became South Africa's first black president after his African National Congress party won the 1994 election.",
+        "mt": "その後、1994年の選挙でアフリカ国民会議派が勝利し、南アフリカ初の黒人大統領となった。"
+    }
+]
+model_output = model.predict(data, batch_size=8, gpus=1)
+print (model_output)

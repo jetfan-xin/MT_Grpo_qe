@@ -808,38 +808,6 @@ class RayPPOTrainer:
                     'current_batch_size': len(test_batch)
                 })
 
-                # ====== 组装记录 -> 用于 W&B 表格 + 本地 JSONL ======
-                # 注意：sample_inputs 是你函数上面已经累计的 list
-                records = []
-                base_len = len(sample_outputs)
-                # 对齐当前这一个 batch 的记录范围
-                start_idx = base_len - n_cur
-                end_idx = base_len
-
-                for i in range(n_cur):
-                    rec = {
-                        "prompt": sample_inputs[start_idx + i] if start_idx + i < len(sample_inputs) else None,
-                        "output": sample_outputs[start_idx + i] if start_idx + i < len(sample_outputs) else None,
-                    }
-                    # 合并各项指标
-                    rec.update(result_list[i])
-                    records.append(rec)
-
-                # ====== W&B 表格：默认上传前 200 条，避免 Dashboard 过大 ======
-                if "wandb" in [b.lower() for b in self.config.trainer.logger]:
-                    try:
-                        import wandb
-                        cols = list(records[0].keys()) if records else ["prompt", "output", "score"]
-                        table = wandb.Table(columns=cols)
-                        max_rows = 200  # 你也可以改大/改小
-                        for rec in records[:max_rows]:
-                            table.add_data(*[rec.get(c, "") for c in cols])
-                        # 用 global_steps 做 key，避免覆盖
-                        wandb.log({f"val/samples_step_{self.global_steps}": table}, step=self.global_steps)
-                        print(f"[VAL] ✅ Logged {min(len(records), max_rows)} rows to W&B table")
-                    except Exception as e:
-                        print(f"[VAL] ⚠️ W&B table log failed: {e}")
-                # ====== 结束 ======
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
