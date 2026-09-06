@@ -24,7 +24,7 @@ python3 ../data/process_data.py \
     --train_output_file ${train_file_path} \
     --test_output_file ${test_file_path}
 
-export WANDB_API_KEY=1526cd13c8d1f8c8529ea57f23d553b20b03451c # set your wandb api key
+export WANDB_API_KEY=xxx # set your wandb api key
 export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1
 
 adv_estimator=grpo

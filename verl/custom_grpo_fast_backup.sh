@@ -33,7 +33,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 
 # wandb：换成你自己的 key / 项目名 / entity
-export WANDB_API_KEY=a28f5c63c96f3bdc885978f31f4619b48811cff7
+export WANDB_API_KEY=xxx
 export WANDB_PROJECT="qwen2.5_0.5b_grpo_mt"
 export WANDB_NAME="qwen2.5_0.5b_r1-zero"
 export WANDB_ENTITY="jetfan-universit-t-hamburg"

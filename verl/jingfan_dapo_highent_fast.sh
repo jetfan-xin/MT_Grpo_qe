@@ -20,7 +20,7 @@ python - <<'PY'
 import torch; print("torch cuda count =", torch.cuda.device_count())
 PY
 # wandb：换成你自己的 key / 项目名 / entity
-export WANDB_API_KEY=a28f5c63c96f3bdc885978f31f4619b48811cff7
+export WANDB_API_KEY=xxx
 export WANDB_PROJECT=qwen25_gapo_mt
 export WANDB_ENTITY=jetfan-universit-t-hamburg
 export WANDB_MODE=online
@@ -28,7 +28,7 @@ export WANDB_MODE=online
 export WANDB_DIR="$PWD/wandb_cache"
 
 # （原来脚本里的 swanlab 就别用了）
-# export SWANLAB_API_KEY=57bftOCtg6exWFs81mtT1
+# export SWANLAB_API_KEY=xxx
 
 ########## 1) 预处理数据 ##########
 train_file_path=../data/train/parquet/train_base_enzh_zhen.parquet

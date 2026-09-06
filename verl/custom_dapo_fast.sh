@@ -11,7 +11,7 @@ python3 ../data/process_data.py \
     --train_output_file ${train_file_path} \
     --test_output_file ${test_file_path}
 
-export SWANLAB_API_KEY=57bftOCtg6exWFs81mtT1
+export SWANLAB_API_KEY=xxx
 export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1
 
 adv_estimator=grpo
