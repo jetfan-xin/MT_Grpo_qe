@@ -18,7 +18,7 @@ else
 fi
 
 WANDB_DIR=/mnt/workspace/xintong/pjh/All_result/mt_grpo/wandb \
-WANDB_API_KEY=1526cd13c8d1f8c8529ea57f23d553b20b03451c \
+WANDB_API_KEY=xxx \
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7  \
 NPROC_PER_NODE=8 \
 swift rlhf \
